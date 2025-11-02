@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+env/
+
+# Editor
+.vscode/
+.idea/
+
+# Logs e Relatórios (IGNORA A PASTA INTEIRA)
+logs/
+*relatorio_cadernos*.md
+
+# Arquivos de sistema
+desktop.ini
+.DS_Store
+
+# Playwright
+trace.zip
+playwright-report/
