@@ -20,3 +20,24 @@ desktop.ini
 # Playwright
 trace.zip
 playwright-report/
+
+# Ambiente Virtual do Python
+.venv/
+
+# Pastas de build do PyInstaller
+build/
+dist/
+*.spec
+
+# Relatórios gerados
+relatorios/
+
+# Dados
+data/
+
+# Arquivos de backup
+*.bak
+*BACKUP.py
+
+# Arquivos de sistema do VSCode
+.vscode/

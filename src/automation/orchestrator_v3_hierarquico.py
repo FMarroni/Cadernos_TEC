@@ -134,8 +134,8 @@ class Orchestrator:
             materias_mapeadas = self.text_matcher.find_best_matches(
                 query_text=nome_aula_bo,
                 candidates=LISTA_COMPLETA_FILTROS_TEC,
-                top_k=2,  # opções
-                threshold=0.80  # Threshold mais alto para assuntos específicos
+                top_k=2,  # Aumentado para pegar mais opções
+                threshold=0.80  # Threshold mais baixo para assuntos específicos
             )
             
             if not materias_mapeadas:

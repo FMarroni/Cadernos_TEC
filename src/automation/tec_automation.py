@@ -26,9 +26,6 @@ class TecAutomationPerfeito:
     def login(self, username: str, password: str) -> bool:
         """
         Preenche as credenciais e pausa para o usuário completar o login (CAPTCHA).
-        
-        Returns:
-            True se o login foi confirmado pelo operador, False caso contrário.
         """
         try:
             self.log("Navegando até a página de login do TEC...")
@@ -39,7 +36,6 @@ class TecAutomationPerfeito:
             self.page.get_by_role("textbox", name="Endereço de e-mail").fill(username)
             self.page.get_by_role("textbox", name="Senha de acesso").fill(password)
             
-            # Envia as instruções de ação manual para o log da GUI
             self.log("\n" + "="*80)
             self.log("⏸  AÇÃO MANUAL NECESSÁRIA NA JANELA DO NAVEGADOR:")
             self.log("  1. Resolva o CAPTCHA manualmente")
@@ -48,8 +44,6 @@ class TecAutomationPerfeito:
             self.log("  4. Feche a janela 'Playwright Inspector' para continuar")
             self.log("="*80 + "\n")
             
-            # page.pause() abre o inspetor do Playwright e pausa a execução
-            # A automação continuará quando o usuário fechar o inspetor.
             self.page.pause()
             
             self.log("\n✅ Login confirmado pelo operador. Prosseguindo...")
@@ -65,60 +59,104 @@ class TecAutomationPerfeito:
         """
         try:
             self.log(f"  > Clicando na categoria de filtro: '{nome_filtro}'")
-            self.page.get_by_text(nome_filtro, exact=True).first.click(timeout=10000)
-            self.page.wait_for_timeout(1000) # Substitui time.sleep(1)
+            # Usamos o seletor 'name=' que o seu gravador descobriu
+            self.page.get_by_role("listitem", name=re.compile(nome_filtro, re.IGNORECASE)).click(timeout=10000)
+            self.page.wait_for_timeout(1000) 
             return True
-        except Exception as e:
-            self.log(f"  ✗ Erro ao clicar na categoria '{nome_filtro}': {e}")
-            return False
+        except Exception:
+            # Fallback para o método antigo se 'name=' falhar
+            self.log(f"  > (Fallback) Tentando clicar por texto: '{nome_filtro}'")
+            try:
+                self.page.get_by_text(nome_filtro, exact=True).first.click(timeout=5000)
+                self.page.wait_for_timeout(1000)
+                return True
+            except Exception as e:
+                self.log(f"  ✗ Erro ao clicar na categoria '{nome_filtro}': {e}")
+                return False
 
-    def _pesquisar_e_selecionar_item(self, item_busca: str):
+
+    def _pesquisar_e_selecionar_item(self, item_busca: str) -> bool:
         """
-        Ativa a busca, digita o termo e clica no item de lista correspondente.
-        VERSÃO CORRIGIDA: Usa a lógica descoberta pelo Playwright Codegen (span.nth(3)).
+        Ativa a busca, digita o termo e clica no item correspondente na lista de resultados.
+        Refatorado com a lógica descoberta pelo Playwright Inspector.
         """
         try:
-            # Passo 1: Ativar o campo de busca
+            # Passo 1: Ativar o campo de busca (se ainda não estiver visível)
             self.log(f"    - Ativando busca para: '{item_busca}'")
-            self.page.get_by_text("Pesquisar por nome").first.click(timeout=5000)
-            self.page.wait_for_timeout(500)
-            
-            # Passo 2: Localizar o campo de texto e digitar o termo
             input_busca = self.page.get_by_role("textbox", name="Digite pelo menos três")
-            input_busca.fill("")  # Limpa o campo
-            self.page.wait_for_timeout(200)
+            
+            if not input_busca.is_visible():
+                self.page.get_by_text("Pesquisar por nome").first.click(timeout=5000)
+                input_busca.wait_for(state="visible", timeout=5000)
+                
+            # Passo 2: Limpar e digitar o termo no campo de busca
+            input_busca.fill("")
+            self.page.wait_for_timeout(200) # Pausa curta para o Angular limpar
             input_busca.fill(item_busca)
-            self.page.wait_for_timeout(1500) # Aguarda os resultados aparecerem
+        
+            # Passo 3: Aguarda aparecer um resultado que CONTENHA o texto de busca.
+            self.log(f"    - Aguardando resultado que contenha '{item_busca}'...")
             
-            # Passo 3: LÓGICA CORRIGIDA - Clicar no span dentro do listitem
-            # O nth(3) representa o 4º span (ícone de adicionar)
-            self.log(f"    - Selecionando item '{item_busca}' da lista...")
-            
-            listitem = self.page.get_by_role("listitem").filter(
-                has_text=re.compile(f"^{re.escape(item_busca)}$", re.IGNORECASE)
+            # --- CORREÇÃO FINAL (v6) - BASEADA NA SUA OBSERVAÇÃO ---
+            # Filtra os resultados para EXCLUIR os itens que são "pastas"
+            # (que contêm o texto "Assuntos contendo").
+            resultado_locator = self.page.get_by_role("listitem").filter(
+                has_text=item_busca
+            ).filter(
+                has_not_text="Assuntos contendo"
             )
             
-            listitem.locator("span").nth(3).click(timeout=5000)
+            # Espera o item (não-pasta) aparecer na lista de resultados
+            self.log(f"    - Esperando pelo PRIMEIRO item (não-pasta) que bate com a busca...")
+            resultado_locator.first.wait_for(state="visible", timeout=10000) 
             
-            self.page.wait_for_timeout(500)
+            # Passo 4: Clicar no ícone de adicionar (span.nth(3))
+            self.log(f"    - Selecionando item '{item_busca}' da lista...")
+            resultado_locator.first.locator("span").nth(3).click(timeout=5000)
+        
+            # O log anterior mostrou que o clique foi sucesso, mas a espera 'hidden' falhou.
+            # Agora só esperamos um tempo fixo para o Angular processar.
+            self.page.wait_for_timeout(500) # Meio segundo
+            
             self.log(f"    ✓ '{item_busca}' selecionado com sucesso")
+            
+            # Passo 5: Corrigindo o Bug do Loop
+            # Clica em "Voltar" para resetar o painel para a próxima busca.
+            try:
+                self.page.get_by_role("link", name="Voltar").click(timeout=1000)
+            except Exception as e:
+                self.log(f"    - (Info) Não foi necessário clicar em 'Voltar'.")
+                
             return True
             
         except Exception as e:
-            self.log(f"    ✗ Erro ao buscar e selecionar '{item_busca}': {e}")
-            self.log(f"    Detalhes: Tentando localizar listitem com texto '{item_busca}' e clicar no span.nth(3)")
+            # Tratamento de erro e log
+            self.log(f"    ✗ Erro ao buscar/selecionar '{item_busca}': {e}")
+            try:
+                # Tenta resetar o estado mesmo se falhar
+                self.page.get_by_role("link", name="Voltar").click(timeout=1000)
+            except Exception: 
+                pass # Ignora erros ao tentar resetar
             return False
 
     def _selecionar_item_lista_simples(self, texto_item: str):
         """
-        Clica diretamente em um item de lista (para Ano e Escolaridade).
+        Clica diretamente no ÍCONE de um item de lista (para Ano e Escolaridade).
         """
         try:
-            self.page.get_by_text(texto_item, exact=True).first.click(timeout=5000)
-            self.page.wait_for_timeout(500)
+            # Esta é a lógica CORRETA (clicar no ícone, não no texto)
+            self.log(f"    - Selecionando item de lista: '{texto_item}'")
+            list_item = self.page.get_by_role("listitem").filter(has_text=texto_item)
+            list_item.locator("span").nth(3).click(timeout=5000)
+
+            # Removemos o fallback (que causava o "seleciona/cancela")
+            # e a espera 'hidden' (que causava o timeout).
+            self.page.wait_for_timeout(500) # Pausa para o Angular processar
+            
             self.log(f"    ✓ '{texto_item}' selecionado")
             return True
         except Exception as e:
+            # Se a lógica principal (clicar no ícone) falhar, logamos o erro.
             self.log(f"    ✗ Erro ao selecionar item de lista '{texto_item}': {e}")
             return False
 
@@ -137,56 +175,53 @@ class TecAutomationPerfeito:
             # [2/4] Aplicação de filtros
             self.log("\n[2/4] Aplicando filtros...")
             
-            # Filtro de Matéria (usa busca)
             if materias and self._clicar_filtro_lateral("Matéria e assunto"):
                 for materia in materias:
                     self._pesquisar_e_selecionar_item(materia)
             
-            # Filtro de Banca (usa busca)
             if self.filtros_padrao.get("bancas") and self._clicar_filtro_lateral("Banca"):
                 for banca in self.filtros_padrao["bancas"]:
                     self._pesquisar_e_selecionar_item(banca)
             
-            # Filtro de Ano (lista simples)
             if self.filtros_padrao.get("anos") and self._clicar_filtro_lateral("Ano"):
                 for ano in self.filtros_padrao["anos"]:
                     self._selecionar_item_lista_simples(str(ano))
             
-            # Filtro de Escolaridade (lista simples)
             if self.filtros_padrao.get("escolaridades") and self._clicar_filtro_lateral("Escolaridade"):
                 mapa_escolaridade = {
                     "Médio": "Ensino Médio",
                     "Superior": "Superior"
                 }
                 for esc in self.filtros_padrao["escolaridades"]:
-                    texto_escolaridade = mapa_escolaridade.get(esc, esc)
+                    texto_escolaridade = mapa_escolaridade.get(esc, esc) 
                     self._selecionar_item_lista_simples(texto_escolaridade)
             
-            self.page.wait_for_timeout(2000)
+            self.page.wait_for_timeout(2000) 
             
             # [3/4] Preenchimento do nome e geração
             self.log("\n[3/4] Preenchendo nome e gerando caderno...")
-            self.page.locator('input[ng-model*="nomeCaderno"]').first.fill(nome_caderno)
+            self.page.get_by_role("textbox", name="Nome do caderno").fill(nome_caderno)
             self.page.wait_for_timeout(500)
             
-            gerar_btn = self.page.get_by_text("Gerar Caderno", exact=True)
-            gerar_btn.wait_for(state="enabled", timeout=15000)
-            gerar_btn.click()
+            gerar_btn = self.page.get_by_role("button", name="Gerar Caderno")
             
-            # [44] Aguardar criação
+            # Removemos as chamadas 'wait_for' redundantes 
+            # O .click() do Playwright já espera automaticamente.
+            self.log("    - Clicando em 'Gerar Caderno' (aguardando ficar pronto)...")
+            gerar_btn.click(timeout=15000)
+            
+            # [4/4] Aguardar criação
             self.log("\n[4/4] Aguardando criação do caderno...")
-            self.page.wait_for_url("**/cadernos/*", timeout=30000)
+            # Espera por uma URL que contenha /cadernos/ e não seja /novo/
+            self.page.wait_for_url(re.compile(r".*/cadernos/(?!novo)"), timeout=30000)
             url_final = self.page.url
             
-            if "cadernos/" in url_final and "novo" not in url_final:
-                self.log(f"\n✅ CADERNO CRIADO COM SUCESSO! URL: {url_final}")
-                return {
-                    "success": True,
-                    "url": url_final,
-                    "nome": nome_caderno
-                }
-            else:
-                raise Exception("A URL final não corresponde a um caderno criado.")
+            self.log(f"\n✅ CADERNO CRIADO COM SUCESSO! URL: {url_final}")
+            return {
+                "success": True,
+                "url": url_final,
+                "nome": nome_caderno
+            }
                 
         except Exception as e:
             self.log(f"\n❌ ERRO GERAL AO CRIAR CADERNO '{nome_caderno}': {e}")
@@ -221,3 +256,4 @@ class TecAutomationPerfeito:
                 self.page.wait_for_timeout(3000)
         
         return resultados
+
