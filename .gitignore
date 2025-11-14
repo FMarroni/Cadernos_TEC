@@ -41,3 +41,6 @@ data/
 
 # Arquivos de sistema do VSCode
 .vscode/
+
+# Ignora a pasta de cache
+cache/
