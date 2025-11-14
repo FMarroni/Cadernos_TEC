@@ -170,7 +170,7 @@ class TextMatcher:
     def find_best_matches_hierarquico_batch(self, 
                                             query_texts: List[str], 
                                             top_k_assuntos: int = 2,
-                                            threshold_materia: float = 0.75,
+                                            threshold_materia: float = 0.85,
                                             threshold_assunto: float = 0.80,
                                             threshold_fallback: float = 0.82) -> List[List[str]]:
         """
