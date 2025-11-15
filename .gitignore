@@ -32,9 +32,6 @@ dist/
 # Relatórios gerados
 relatorios/
 
-# Dados
-data/
-
 # Arquivos de backup
 *.bak
 *BACKUP.py
