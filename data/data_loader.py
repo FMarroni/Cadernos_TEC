@@ -1,21 +1,29 @@
 # Ficheiro: data/data_loader.py
-# (VERSÃO 5 - CORREÇÃO do AttributeError 'lista_completa_fallback')
 
 import os
+import sys  # <-- Importe o 'sys'
 import json
 import traceback
 from typing import List, Dict, Callable
 
-# Esta lógica agora encontra o arquivo JSON ao lado deste script
-try:
-    # Obtém o caminho absoluto para o diretório onde este script (data_loader.py) está
-    _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-except NameError:
-    # Fallback para o PyInstaller (quando __file__ não está definido)
-    _SCRIPT_DIR = os.path.dirname(os.path.abspath(sys.argv[0]))
+def resource_path(relative_path: str) -> str:
+    """
+    Retorna o caminho absoluto para o recurso, funcionando para desenvolvimento
+    e para o executável do PyInstaller.
+    """
+    try:
+        # PyInstaller cria uma pasta temporária e armazena o caminho em _MEIPASS
+        base_path = sys._MEIPASS
+    except AttributeError:
+        # Se _MEIPASS não existir, estamos em modo de desenvolvimento
+        # O caminho base é o diretório do script principal que foi executado
+        base_path = os.path.abspath(".")
+    
+    return os.path.join(base_path, relative_path)
 
-# Constrói o caminho para o arquivo JSON
-HIERARQUIA_FILE = os.path.join(_SCRIPT_DIR, "materias_assuntos_tec.json")
+# Constrói o caminho para o arquivo JSON usando a função auxiliar
+# O caminho relativo deve ser 'data/materias_assuntos_tec.json'
+HIERARQUIA_FILE = resource_path("data/materias_assuntos_tec.json")
 
 
 class DataLoader:
@@ -30,34 +38,35 @@ class DataLoader:
         # Atributos que serão preenchidos
         self.materias: List[str] = []
         self.assuntos_por_materia: Dict[str, List[str]] = {}
-        self.lista_completa_fallback: List[str] = [] # <-- Será preenchido agora
+        self.lista_completa_fallback: List[str] = []
 
         try:
             self._load_and_process_data()
         except Exception as e:
             self.log(f"❌ Falha crítica ao carregar ou processar o arquivo de dados: {e}")
             self.log(traceback.format_exc())
-            raise # Interrompe a inicialização do Orquestrador
+            raise
 
     def _load_and_process_data(self):
         """Lê o JSON e preenche os atributos da classe."""
         self.log(f"Carregando arquivo de hierarquia: {HIERARQUIA_FILE}")
 
         try:
+            # A lógica aqui dentro não precisa mudar
             with open(HIERARQUIA_FILE, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         except FileNotFoundError:
             self.log(f"❌ ERRO CRÍTICO: Arquivo de dados não encontrado em '{HIERARQUIA_FILE}'")
-            self.log(f"  (Verifique se 'materias_assuntos_tec.json' está na pasta 'data')")
+            self.log(f"  (Verifique se 'materias_assuntos_tec.json' está na pasta 'data' e se a pasta foi incluída no build)")
             raise
         except json.JSONDecodeError:
             self.log(f"❌ ERRO CRÍTICO: O arquivo '{HIERARQUIA_FILE}' não é um JSON válido.")
             raise
         
-        # Listas temporárias
+        # O resto do seu código permanece exatamente o mesmo...
         materias_list = []
         assuntos_dict = {}
-        lista_fallback = [] # Lista plana com TODOS os assuntos
+        lista_fallback = []
 
         for materia_data in data:
             nome_materia = materia_data.get('nome')
@@ -71,12 +80,11 @@ class DataLoader:
                 nome_assunto = assunto_data.get('nome')
                 if nome_assunto:
                     assuntos_dict[nome_materia].append(nome_assunto)
-                    lista_fallback.append(nome_assunto) # Adiciona à lista plana
+                    lista_fallback.append(nome_assunto)
         
         self.log(f"Processadas {len(materias_list)} matérias e {len(lista_fallback)} assuntos no total.")
         
-        # Armazena os resultados como atributos da instância
         self.materias = materias_list
         self.assuntos_por_materia = assuntos_dict        
         self.lista_completa_fallback = lista_fallback
-        
+
