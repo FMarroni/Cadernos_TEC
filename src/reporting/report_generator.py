@@ -1,171 +1,146 @@
-# Ficheiro: src/reporting/report_generator.py
-# (VERSÃO 7 - Layout de HTML com mais colunas)
+# src/reporting/report_generator.py (VERSÃO FINAL - CABEÇALHO COMPLETO)
 
 import os
-import jinja2
 from datetime import datetime
 from typing import List, Dict, Any, Callable
-import traceback
-
-# --- TEMPLATE HTML ATUALIZADO (REQ 1, 2, 3) ---
-HTML_TEMPLATE = """
-<!DOCTYPE html>
-<html lang="pt-br">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Relatório de Geração de Cadernos</title>
-    <style>
-        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; line-height: 1.6; padding: 20px; max-width: 1400px; margin: auto; color: #333; }
-        h1 { color: #005a9c; border-bottom: 2px solid #005a9c; padding-bottom: 5px; }
-        h2 { color: #444; border-bottom: 1px solid #eee; padding-bottom: 3px; }
-        .container { background: #fdfdfd; border: 1px solid #ddd; border-radius: 8px; padding: 25px; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
-        .filtros { background: #f9f9f9; border: 1px solid #eee; padding: 15px; border-radius: 5px; margin-bottom: 20px; }
-        .filtros p { margin: 5px 0; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 0.9em; }
-        th, td { border: 1px solid #ddd; padding: 10px 12px; text-align: left; }
-        th { background-color: #f4f4f4; }
-        tr:nth-child(even) { background-color: #f9f9f9; }
-        .status-sucesso { color: #28a745; font-weight: bold; }
-        .status-falha { color: #dc3545; font-weight: bold; }
-        .link-caderno { word-break: break-all; }
-        a { color: #007bff; text-decoration: none; }
-        a:hover { text-decoration: underline; }
-        /* Colunas com largura definida */
-        col.col-aula { width: 30%; }
-        col.col-status { width: 8%; }
-        col.col-qtd { width: 8%; }
-        col.col-filtros { width: 30%; }
-        col.col-link { width: 24%; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>Relatório de Geração de Cadernos</h1>
-        
-        <div class="filtros">
-            <h2>Filtros Aplicados (Padrão)</h2>
-            <p><strong>Curso:</strong> {{ nome_curso }}</p>
-            <p><strong>Data de Geração:</strong> {{ data_geracao }}</p>
-            <hr>
-            <p><strong>Bancas:</strong> {{ bancas }}</p>
-            <p><strong>Anos:</strong> {{ anos }}</p>
-            <p><strong>Escolaridade:</strong> {{ escolaridade }}</p>
-        </div>
-
-        <h2>Resultados da Automação</h2>
-        <table>
-            <colgroup>
-                <col class="col-aula">
-                <col class="col-status">
-                <col class="col-qtd">
-                <col class="col-filtros">
-                <col class="col-link">
-            </colgroup>
-            <thead>
-                <tr>
-                    <th>Aula (Nome do Caderno)</th>
-                    <th>Status</th>
-                    <th>Qtd. Questões</th>
-                    <th>Filtros (IA)</th>
-                    <th>Link / Observação</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% for item in resultados %}
-                <tr>
-                    <!-- Aula -->
-                    <td>{{ item.nome | e }}</td>
-                    
-                    <!-- Status -->
-                    {% if item.success %}
-                        <td class="status-sucesso">✅ Sucesso</td>
-                    {% else %}
-                        <td class="status-falha">❌ Falha</td>
-                    {% endif %}
-                    
-                    <!-- Qtd. Questões -->
-                    <td>{{ item.num_questoes if item.num_questoes > 0 else 'N/A' }}</td>
-                    
-                    <!-- Filtros (IA) -->
-                    <td>{{ item.filtros_ia | e }}</td>
-                    
-                    <!-- Link / Observação (Erro) -->
-                    {% if item.success %}
-                        <td class="link-caderno"><a href="{{ item.url }}" target="_blank">{{ item.url }}</a></td>
-                    {% else %}
-                        <td>{{ item.erro | e }}</td> <!-- Mensagem de erro limpa -->
-                    {% endif %}
-                </tr>
-                {% endfor %}
-            </tbody>
-        </table>
-    </div>
-</body>
-</html>
-"""
-# --- FIM DO TEMPLATE ---
 
 class ReportGenerator:
-    """
-    Responsável por gerar o relatório final em .html usando um template Jinja2.
-    """
-
     def __init__(self, log_callback: Callable[..., None]):
-        """
-        Inicializa o gerador de relatório.
-        """
         self.log = log_callback
+        self.template_path = os.path.join("templates", "template_relatorio.html") # Usando HTML puro agora
+        self.output_dir = "relatorios"
+        os.makedirs(self.output_dir, exist_ok=True)
+
+    def generate_report(self, user_data: Dict[str, Any], resultados: List[Dict[str, Any]]) -> str:
+        """
+        Gera um relatório HTML rico com os resultados.
+        """
         self.log("Gerador de Relatório HTML inicializado.")
-        
+        self.log("Iniciando geração do relatório em HTML...")
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        # Extrai ID do curso se possível para o nome do arquivo
+        curso_id = "Curso"
         try:
-            # Carrega o template Jinja2 a partir da string
-            self.template = jinja2.Template(HTML_TEMPLATE)
-        except Exception as e:
-            self.log(f"❌ ERRO CRÍTICO: Falha ao carregar template Jinja2 incorporado: {e}")
-            raise
-
-    def generate_report(self, user_data: Dict[str, Any], resultados: List[Dict[str, Any]], output_dir: str = "relatorios") -> str:
-        """
-        Gera o relatório .html preenchendo o template com os dados.
-        """
-        self.log(f"Iniciando geração do relatório em HTML...")
+            if 'id=' in user_data.get('course_url', ''):
+                curso_id = user_data['course_url'].split('id=')[-1]
+        except: pass
         
+        filename = f"Relatorio_Cadernos_{curso_id}_{timestamp}.html"
+        filepath = os.path.join(self.output_dir, filename)
+
+        # --- Extração de Filtros para o Cabeçalho ---
+        # Garante que apareça "Nenhum" se estiver vazio
+        banca_display = user_data.get('banca') or "Todas"
+        ano_display = user_data.get('ano') or "Todos"
+        
+        # Escolaridade vem como string da GUI nova
+        esc_raw = user_data.get('escolaridade', '')
+        escolaridade_display = esc_raw if esc_raw else "Todas"
+
+        # Estatísticas
+        total = len(resultados)
+        sucessos = sum(1 for r in resultados if r.get('success'))
+        falhas = total - sucessos
+
+        # --- Montagem do HTML ---
+        html_content = f"""
+        <!DOCTYPE html>
+        <html lang="pt-br">
+        <head>
+            <meta charset="UTF-8">
+            <title>Relatório de Cadernos TEC</title>
+            <style>
+                body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 40px; background-color: #f4f4f9; }}
+                .container {{ background: white; padding: 30px; border-radius: 10px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }}
+                h1 {{ color: #2c3e50; border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
+                .stats-box {{ display: flex; gap: 20px; margin-bottom: 20px; }}
+                .stat {{ background: #ecf0f1; padding: 15px; border-radius: 5px; flex: 1; text-align: center; }}
+                .stat strong {{ display: block; font-size: 24px; color: #2c3e50; }}
+                .filters-box {{ background: #e8f4f8; padding: 15px; border-radius: 5px; margin-bottom: 30px; border-left: 5px solid #3498db; }}
+                table {{ width: 100%; border-collapse: collapse; margin-top: 20px; }}
+                th, td {{ padding: 12px; text-align: left; border-bottom: 1px solid #ddd; }}
+                th {{ background-color: #34495e; color: white; }}
+                tr:hover {{ background-color: #f1f1f1; }}
+                .status-ok {{ color: #27ae60; font-weight: bold; }}
+                .status-fail {{ color: #c0392b; font-weight: bold; }}
+                a {{ color: #3498db; text-decoration: none; }}
+                a:hover {{ text-decoration: underline; }}
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <h1>Relatório de Geração de Cadernos</h1>
+                
+                <div class="filters-box">
+                    <h3>⚙️ Filtros Aplicados</h3>
+                    <p><strong>Banca:</strong> {banca_display}</p>
+                    <p><strong>Ano:</strong> {ano_display}</p>
+                    <p><strong>Escolaridade:</strong> {escolaridade_display}</p>
+                    <p><strong>Data:</strong> {datetime.now().strftime("%d/%m/%Y às %H:%M")}</p>
+                </div>
+
+                <div class="stats-box">
+                    <div class="stat"><strong>{total}</strong> Aulas Processadas</div>
+                    <div class="stat" style="color: #27ae60;"><strong>{sucessos}</strong> Cadernos Criados</div>
+                    <div class="stat" style="color: #c0392b;"><strong>{falhas}</strong> Falhas</div>
+                </div>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Aula (Nome do Caderno)</th>
+                            <th>Status</th>
+                            <th>Questões</th>
+                            <th width="30%">Filtros Usados (IA)</th>
+                            <th>Link / Erro</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+        """
+
+        for r in resultados:
+            nome = r.get('nome_caderno', 'Sem Nome')
+            status = "✅ Sucesso" if r.get('success') else "❌ Falha"
+            status_class = "status-ok" if r.get('success') else "status-fail"
+            qtd = r.get('num_questoes', 0)
+            
+            # Filtros IA (Assuntos)
+            filtros = r.get('filtros_ia', 'N/A')
+            
+            # Link ou Erro
+            if r.get('success'):
+                link = r.get('url', '#')
+                acao = f'<a href="{link}" target="_blank">Abrir Caderno 🔗</a>'
+            else:
+                erro = r.get('erro', 'Erro desconhecido')
+                acao = f'<span style="color:red">{erro}</span>'
+
+            html_content += f"""
+                        <tr>
+                            <td>{nome}</td>
+                            <td class="{status_class}">{status}</td>
+                            <td>{qtd}</td>
+                            <td style="font-size: 0.9em; color: #555;">{filtros}</td>
+                            <td>{acao}</td>
+                        </tr>
+            """
+
+        html_content += """
+                    </tbody>
+                </table>
+            </div>
+        </body>
+        </html>
+        """
+
         try:
-            course_id = user_data.get('course_url', 'ID_DESCONHECIDO').split('id=')[-1]
-
-            context = {
-                "nome_curso": f"Curso ID: {course_id}",
-                "data_geracao": datetime.now().strftime("%d/%m/%Y às %H:%M:%S"),
-                "bancas": user_data.get("report_bancas", "N/A") or "N/A",
-                "anos": user_data.get("report_anos", "N/A") or "N/A",
-                "escolaridade": user_data.get("report_escolaridade", "N/A") or "N/A",
-                "resultados": resultados # A lista já vem formatada pelo Orquestrador
-            }
-            
-            if not os.path.exists(output_dir):
-                os.makedirs(output_dir)
-                self.log(f"Pasta de relatórios criada em: {output_dir}")
-
-            timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-            output_filename = f"Relatorio_Cadernos_{course_id}_{timestamp}.html"
-            output_path = os.path.join(output_dir, output_filename)
-
-            html_content = self.template.render(context)
-            
-            with open(output_path, "w", encoding="utf-8") as f:
+            with open(filepath, "w", encoding="utf-8") as f:
                 f.write(html_content)
             
-            absolute_path = os.path.abspath(output_path)
-            
-            self.log("\n" + "="*80)
-            self.log(f"✅ RELATÓRIO FINAL GERADO COM SUCESSO!")
-            self.log(f"Arquivo salvo em: {absolute_path}")
-            self.log("="*80)
-            
-            return absolute_path
-
+            self.log("✅ RELATÓRIO FINAL GERADO COM SUCESSO!")
+            self.log(f"Arquivo salvo em: {filepath}")
+            return filepath
         except Exception as e:
-            self.log(f"❌ ERRO CRÍTICO ao gerar relatório HTML: {e}")
-            self.log(traceback.format_exc())
+            self.log(f"❌ Erro ao salvar relatório HTML: {e}")
             return None
