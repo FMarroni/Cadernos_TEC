@@ -1,4 +1,4 @@
-# src/automation/tec_automation.py (VERSÃO FINAL V6 - SELETORES DE ASSUNTO REFINADOS)
+# src/automation/tec_automation.py (CORRIGIDO - KEYERROR RESOLVIDO)
 
 import re
 import traceback
@@ -70,14 +70,7 @@ class TecAutomationPerfeito:
             # --- LÓGICA DE SELEÇÃO COM SELETORES ESPECÍFICOS ---
             
             # O seletor base para a área de resultados da busca (árvore)
-            # Baseado na imagem e na estrutura fornecida
             base_arvore = "div.arvore-wrapper > div > ul"
-            
-            # Estratégia:
-            # Encontrar o elemento <span> que contém o texto exato do item.
-            # MAS, precisamos garantir que é um item "final" (filho) e não uma pasta pai.
-            # Pastas geralmente têm o ícone "arvore-item-icone" (pasta fechada/aberta).
-            # Itens selecionáveis podem ter "arvore-item-icone-operacao" (+) ou serem folhas da árvore.
             
             # Localiza todos os spans com o nome do item
             candidatos = self.page.locator(f"{base_arvore} span.arvore-item-nome").filter(has_text=item).all()
@@ -86,7 +79,6 @@ class TecAutomationPerfeito:
             
             if not candidatos:
                 self.log(f"    ⚠️ Item '{item}' não encontrado na busca.")
-                # Tenta limpar e fechar
                 try: self.page.get_by_role("link", name="Voltar").click(timeout=500)
                 except: pass
                 return False
@@ -94,7 +86,6 @@ class TecAutomationPerfeito:
             # Se houver mais de um (ex: pasta com mesmo nome do filho), tenta desambiguar
             for cand in candidatos:
                 # Verifica se este item tem um botão de "adicionar" (+) associado
-                # O botão fica no mesmo container <div> ou <span> pai
                 pai = cand.locator("xpath=..") # Sobe um nível
                 botao_mais = pai.locator("span.arvore-item-icone-operacao")
                 
@@ -127,7 +118,7 @@ class TecAutomationPerfeito:
 
     def _selecionar_escolaridade_exata(self, nivel_texto: str):
         """
-        Seleciona a escolaridade usando os SELETORES CSS EXATOS (Mantido e funcional).
+        Seleciona a escolaridade usando os SELETORES CSS EXATOS.
         """
         self.log(f"    - Selecionando Escolaridade (Modo Exato): '{nivel_texto}'")
         
@@ -202,6 +193,7 @@ class TecAutomationPerfeito:
                     "erro": "0 questões encontradas", 
                     "num_questoes": 0, 
                     "filtros_usados": materias,
+                    "nome_caderno": nome_caderno, # <--- ADICIONADO
                     "url": self.page.url
                 }
 
@@ -216,7 +208,7 @@ class TecAutomationPerfeito:
             return {
                 "success": True, 
                 "url": self.page.url, 
-                "nome": nome_caderno, 
+                "nome_caderno": nome_caderno, 
                 "num_questoes": num, 
                 "filtros_usados": materias
             }
@@ -228,6 +220,7 @@ class TecAutomationPerfeito:
                 "erro": str(e)[:100], 
                 "num_questoes": 0, 
                 "filtros_usados": materias,
+                "nome_caderno": nome_caderno, 
                 "url": self.page.url
             }
 

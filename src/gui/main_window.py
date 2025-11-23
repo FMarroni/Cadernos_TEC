@@ -1,22 +1,27 @@
-# src/gui/main_window.py (VERSÃO FINAL - COM CHECKBOXES DE ESCOLARIDADE)
+# src/gui/main_window.py
 
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
+from ttkbootstrap.dialogs import Messagebox
 from tkinter.scrolledtext import ScrolledText
 import threading
 import os
 import sys
 import webbrowser
+import json  # <--- Importante para salvar/carregar
 
 sys.path.append(os.getcwd())
 from data.data_loader import DataLoader
 from main import run_automation_logic
 
+# Nome do arquivo onde as configurações serão salvas
+CONFIG_FILE = "user_settings.json"
+
 class App(ttk.Window):
     def __init__(self):
         super().__init__(themename="litera")
         self.title("Automação TEC - IA Inteligente")
-        self.geometry("1200x900") # Aumentei um pouco a altura
+        self.geometry("1200x900")
         self.last_report_path = None
         
         try:
@@ -26,6 +31,7 @@ class App(ttk.Window):
             self.lista_materias = []
 
         self.create_layout()
+        self.load_settings() # <--- Carrega as configurações ao iniciar
 
     def create_layout(self):
         self.grid_columnconfigure(0, weight=3)
@@ -49,32 +55,32 @@ class App(ttk.Window):
         self.entry_url = ttk.Entry(control_panel)
         self.entry_url.pack(fill="x", pady=5)
 
-        ttk.Label(control_panel, text="Forçar Matéria (Opcional):", font=("Helvetica", 10, "bold"), bootstyle="primary").pack(anchor="w", pady=(10,0))
-        self.combo_materia = ttk.Combobox(control_panel, values=["Automático (IA)"] + self.lista_materias, state="readonly")
-        self.combo_materia.set("Automático (IA)")
+        ttk.Label(control_panel, text="Matéria (Obrigatório):", font=("Helvetica", 10, "bold"), bootstyle="primary").pack(anchor="w", pady=(10,0))
+        
+        self.combo_materia = ttk.Combobox(control_panel, values=self.lista_materias, state="readonly")
+        if self.lista_materias:
+             self.combo_materia.current(0) 
         self.combo_materia.pack(fill="x", pady=5)
 
         # Filtros de Texto
         self.add_entry(control_panel, "Banca (ex: VUNESP):", "banca")
         self.add_entry(control_panel, "Ano (ex: 2023, 2024):", "ano")
 
-        # --- NOVO: SELEÇÃO MÚLTIPLA DE ESCOLARIDADE ---
+        # Seleção de Escolaridade
         ttk.Label(control_panel, text="Escolaridade:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10,0))
         
         self.frame_escolaridade = ttk.Frame(control_panel)
         self.frame_escolaridade.pack(fill="x", pady=5)
         
-        # Checkboxes para as opções mais comuns
         self.vars_escolaridade = {
             "Superior": ttk.BooleanVar(value=False),
-            "Médio": ttk.BooleanVar(value=False), # Mapeia para 'Ensino Médio' no robô
+            "Médio": ttk.BooleanVar(value=False),
             "Fundamental": ttk.BooleanVar(value=False)
         }
         
         for nivel, var in self.vars_escolaridade.items():
             cb = ttk.Checkbutton(self.frame_escolaridade, text=nivel, variable=var, bootstyle="round-toggle")
             cb.pack(side="left", padx=5)
-        # ----------------------------------------------
 
         # Botões
         self.btn_start = ttk.Button(control_panel, text="INICIAR AUTOMAÇÃO", bootstyle="success", command=self.start_thread)
@@ -105,20 +111,85 @@ class App(ttk.Window):
         self.log_area.see("end")
         self.log_area.config(state="disabled")
 
+    # --- MÉTODOS DE PERSISTÊNCIA (SALVAR/CARREGAR) ---
+    def save_settings(self):
+        """Salva os campos atuais em um arquivo JSON."""
+        settings = {
+            "tec_user": self.entry_tec_user.get(),
+            "tec_pass": self.entry_tec_pass.get(),
+            "bo_user": self.entry_bo_user.get(),
+            "bo_pass": self.entry_bo_pass.get(),
+            "url": self.entry_url.get(),
+            "materia": self.combo_materia.get(),
+            "banca": self.entry_banca.get(),
+            "ano": self.entry_ano.get(),
+            "escolaridade": {
+                "Superior": self.vars_escolaridade["Superior"].get(),
+                "Médio": self.vars_escolaridade["Médio"].get(),
+                "Fundamental": self.vars_escolaridade["Fundamental"].get()
+            }
+        }
+        try:
+            with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=4)
+        except Exception as e:
+            self.log(f"⚠️ Não foi possível salvar as configurações: {e}")
+
+    def load_settings(self):
+        """Carrega as configurações do arquivo JSON se existir."""
+        if not os.path.exists(CONFIG_FILE):
+            return
+        
+        try:
+            with open(CONFIG_FILE, 'r', encoding='utf-8') as f:
+                settings = json.load(f)
+            
+            # Função auxiliar para preencher campos de texto
+            def safe_fill(entry, key):
+                if key in settings and settings[key]:
+                    entry.delete(0, 'end')
+                    entry.insert(0, settings[key])
+
+            safe_fill(self.entry_tec_user, "tec_user")
+            safe_fill(self.entry_tec_pass, "tec_pass")
+            safe_fill(self.entry_bo_user, "bo_user")
+            safe_fill(self.entry_bo_pass, "bo_pass")
+            safe_fill(self.entry_url, "url")
+            safe_fill(self.entry_banca, "banca")
+            safe_fill(self.entry_ano, "ano")
+
+            # Preenche Matéria
+            if "materia" in settings and settings["materia"] in self.lista_materias:
+                self.combo_materia.set(settings["materia"])
+            
+            # Preenche Checkboxes de Escolaridade
+            if "escolaridade" in settings:
+                esc_data = settings["escolaridade"]
+                for key, val in esc_data.items():
+                    if key in self.vars_escolaridade:
+                        self.vars_escolaridade[key].set(val)
+
+        except Exception as e:
+            self.log(f"⚠️ Erro ao carregar configurações salvas: {e}")
+
     def start_thread(self):
+        # 1. Salva as configurações atuais antes de tentar rodar
+        self.save_settings()
+
         materia = self.combo_materia.get()
-        if materia == "Automático (IA)": materia = None
+        
+        if not materia:
+            Messagebox.show_error("Você deve selecionar uma Matéria antes de iniciar.", "Campo Obrigatório")
+            return
 
         # Coleta Escolaridades Selecionadas
         escolaridades_selecionadas = []
         for nivel, var in self.vars_escolaridade.items():
             if var.get():
-                # Converte para o texto esperado pelo robô/site
                 if nivel == "Médio": escolaridades_selecionadas.append("Ensino Médio")
                 elif nivel == "Fundamental": escolaridades_selecionadas.append("Ensino Fundamental")
                 else: escolaridades_selecionadas.append(nivel)
         
-        # Se nenhuma foi marcada, manda vazio (sem filtro)
         str_escolaridade = ",".join(escolaridades_selecionadas)
 
         config = {
@@ -129,7 +200,7 @@ class App(ttk.Window):
             "course_url": self.entry_url.get(),
             "banca": self.entry_banca.get(),
             "ano": self.entry_ano.get(),
-            "escolaridade": str_escolaridade, # Passa como string separada por vírgula para o Orchestrator processar
+            "escolaridade": str_escolaridade,
             "materia_selecionada": materia
         }
         
