@@ -3,13 +3,13 @@
     "tec_pass": "527412",
     "bo_user": "marroni.felipe@gmail.com",
     "bo_pass": "23242509FTac",
-    "url": "https://www.estrategiaconcursos.com.br/admin/produto-curso/?id=348023",
-    "materia": "Direito Penal",
+    "course_url": "https://www.estrategiaconcursos.com.br/admin/produto-curso/?id=348023",
     "banca": "VUNESP",
     "ano": "2023, 2024",
     "escolaridade": {
         "Superior": true,
         "M\u00e9dio": true,
         "Fundamental": false
-    }
+    },
+    "materia": "Direito Penal"
 }
