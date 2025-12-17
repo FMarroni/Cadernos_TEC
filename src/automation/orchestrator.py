@@ -26,29 +26,57 @@ class Orchestrator:
             lista_completa_fallback=self.data_loader.lista_completa_fallback
         )
 
+    def _extract_course_id(self, url: str) -> str:
+        try:
+            return url.split('id=')[-1].strip()
+        except:
+            return "unknown"
+
     def fetch_and_preview_matches(self) -> List[Dict]:
         """
-        Modo de revisão: 
-        1. Busca aulas no BO.
-        2. Roda IA.
-        3. FUNDE com o Cache (Memória) para respeitar correções anteriores.
+        BOTÃO 1: Lógica de Preparação (BackOffice + IA + Cache)
         """
-        # --- ALTERAÇÃO: NÃO LIMPAMOS MAIS O CACHE AQUI ---
-        # self.cache_manager.clear_cache() <--- Removido para manter a memória
+        current_url = self.user_data.get('course_url', '')
+        current_id = self._extract_course_id(current_url)
+        cached_id = self.cache_manager.get_course_id()
+
+        dados_para_review = []
         
+        # 1. VERIFICAÇÃO DE MEMÓRIA (Pulo do Gato para evitar Login BO)
+        if current_id and current_id == cached_id:
+            self.log(f"🧠 Curso ID {current_id} reconhecido na memória.")
+            self.log("⏩ Pulando acesso ao BackOffice e usando dados salvos.")
+            
+            # Reconstrói a estrutura para a ReviewWindow baseada apenas no Cache
+            data_map = self.cache_manager.cache_structure["data"]
+            if data_map:
+                for aula, filtros in data_map.items():
+                    matches_formatados = [{'termo': f, 'score': 1.0, 'origem': 'Memória'} for f in filtros]
+                    dados_para_review.append({
+                        'aula': aula,
+                        'matches': matches_formatados
+                    })
+                return dados_para_review
+            else:
+                self.log("⚠️ Memória vazia, iniciando busca no BO...")
+
+        # 2. SE NÃO TIVER MEMÓRIA, ACESSA O BO
+        self.log(f"🔄 Novo curso detectado (ID: {current_id}). Iniciando acesso ao BO...")
+        
+        # Limpa cache antigo pois mudou o curso
+        self.cache_manager.reset_cache()
+        self.cache_manager.set_course_id(current_id)
+
         automation = WebAutomation(log_callback=self.log, headless=self.headless)
         try:
             automation.start()
             bo = BoAutomation(automation.page, self.log)
             bo.login(self.user_data['bo_user'], self.user_data['bo_pass'])
             
-            try:
-                curso_id = self.user_data['course_url'].split('id=')[-1].strip()
-            except:
-                self.log("❌ URL inválida.")
+            aulas_bo = bo.get_aulas(current_id)
+            if not aulas_bo:
+                self.log("❌ Nenhuma aula encontrada no BO.")
                 return []
-                
-            aulas_bo = bo.get_aulas(curso_id)
             
         except Exception as e:
             self.log(f"Erro ao buscar aulas: {e}")
@@ -56,87 +84,54 @@ class Orchestrator:
         finally:
             automation.stop()
 
-        self.log("🧠 IA processando aulas...")
-        # A IA roda para todas as aulas (caso haja alguma nova)
+        # 3. RODA A IA
+        self.log("🤖 Processando aulas com IA...")
         tarefas_detalhadas = self._match_aulas_inteligente(aulas_bo, return_details=True)
         
-        dados_para_review = []
-        
-        # --- LÓGICA DE FUSÃO (Memória vs IA) ---
         for tarefa in tarefas_detalhadas:
-            aula_nome = tarefa['aula_original']
-            
-            # Pergunta para a memória: "Já corrigimos essa aula antes?"
-            memoria = self.cache_manager.get(aula_nome)
-            
-            matches_finais = []
-            if memoria is not None:
-                # Se tem memória, usa ela e marca como CACHE (Azul)
-                self.log(f"💾 Recuperando memória para: {aula_nome[:30]}...")
-                for filtro in memoria:
-                    matches_finais.append({
-                        'termo': filtro,
-                        'score': 1.0,
-                        'origem': 'Cache' # Isso fará aparecer em AZUL na tela
-                    })
-            else:
-                # Se não tem memória, usa a sugestão da IA
-                matches_finais = tarefa['matches_detalhados']
-
             dados_para_review.append({
-                'aula': aula_nome,
-                'matches': matches_finais
+                'aula': tarefa['aula_original'],
+                'matches': tarefa['matches_detalhados']
             })
             
         return dados_para_review
 
-    def run(self) -> str:
-        """Modo Execução: Verifica cache para pular BO"""
+    def run_tec_automation(self) -> str:
+        """
+        BOTÃO 2: Apenas execução no TEC (Baseado no Cache/Revisão)
+        """
+        self.log("🚀 Iniciando fase de automação no TEC Concursos...")
+        
+        # 1. Carrega tarefas da memória (definidas na Revisão)
+        tarefas = self.cache_manager.get_all_tasks_formatted()
+        
+        if not tarefas:
+            self.log("❌ Nenhuma tarefa encontrada na memória.")
+            self.log("⚠️ Por favor, execute 'Revisar Matches' primeiro e Salve a revisão.")
+            return None
+
+        self.log(f"📂 {len(tarefas)} cadernos prontos para criação.")
+
         automation = WebAutomation(log_callback=self.log, headless=self.headless)
         try:
             automation.start()
             page = automation.page
             
-            tarefas = []
-            
-            # 1. Verifica Cache (Pulo do Gato)
-            tarefas_em_cache = self.cache_manager.get_all_tasks_formatted()
-            
-            if tarefas_em_cache and len(tarefas_em_cache) > 0:
-                self.log("⚡ MODO TURBO: Usando dados da memória (Cache).")
-                self.log("⏩ Pulando Backoffice e IA...")
-                tarefas = tarefas_em_cache
-            else:
-                self.log("ℹ️ Cache vazio. Executando fluxo completo.")
-                
-                # Fluxo Normal (BO + IA) - Só roda se nunca tiver revisado
-                bo = BoAutomation(page, self.log)
-                bo.login(self.user_data['bo_user'], self.user_data['bo_pass'])
-                try:
-                    curso_id = self.user_data['course_url'].split('id=')[-1].strip()
-                except: return None
-                aulas_bo = bo.get_aulas(curso_id)
-                
-                ia_matches = self._match_aulas_inteligente(aulas_bo, return_details=True)
-                for item in ia_matches:
-                    filters = [m['termo'] for m in item['matches_detalhados']]
-                    tarefas.append({
-                        "nome_caderno": f"Caderno - {item['aula_original']}",
-                        "materias": filters,
-                        "mapeado": bool(filters)
-                    })
-
-            # 2. Site TEC (Sempre roda)
-            if not tarefas:
-                self.log("❌ Nenhuma tarefa válida.")
-                return None
-
+            # 2. Login e Criação no TEC
             filtros_tec = self._prepare_filters()
             tec = TecAutomationPerfeito(page, self.log, filtros_tec)
             
             if tec.login(self.user_data['tec_user'], self.user_data['tec_pass']):
-                resultados = tec.criar_multiplos_cadernos([t for t in tarefas if t['mapeado']])
+                # Filtra apenas o que tem mapeamento
+                cadernos_validos = [t for t in tarefas if t['mapeado']]
                 
+                if not cadernos_validos:
+                    self.log("⚠️ Nenhuma aula possui matérias vinculadas. Nada a criar.")
+                    return None
+
+                resultados = tec.criar_multiplos_cadernos(cadernos_validos)
+                
+                # Consolidação para Relatório
                 final_res = []
                 mapa_res = {r['nome_caderno']: r for r in resultados}
                 
@@ -145,7 +140,7 @@ class Orchestrator:
                         t.update(mapa_res[t['nome_caderno']])
                     else:
                         if not t.get('success'):
-                            t.update({"success": False, "erro": "Não mapeado/Falha", "num_questoes": 0})
+                            t.update({"success": False, "erro": "Não mapeado/Ignorado", "num_questoes": 0})
                     
                     if 'materias' in t and isinstance(t['materias'], list):
                         t['filtros_ia'] = ", ".join(t['materias'])
@@ -155,14 +150,17 @@ class Orchestrator:
 
                 gen = ReportGenerator(self.log)
                 return gen.generate_report(self.user_data, final_res)
+            else:
+                self.log("❌ Falha no login do TEC.")
 
         except Exception as e:
-            self.log(f"❌ Erro: {e}")
+            self.log(f"❌ Erro fatal na automação TEC: {e}")
             self.log(traceback.format_exc())
         finally:
             automation.stop()
         return None
 
+    # ... (Os métodos _match_aulas_inteligente e _prepare_filters continuam iguais) ...
     def _match_aulas_inteligente(self, aulas_bo, return_details=False):
         materia_alvo = self.user_data.get("materia_selecionada")
         def limpar(nome): return re.sub(r'(?i)aula\s+\d+\s*[:.-]\s*', '', nome).strip()

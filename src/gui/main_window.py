@@ -8,10 +8,13 @@ import os
 import sys
 import webbrowser
 import json
+import traceback
 
 sys.path.append(os.getcwd())
 from data.data_loader import DataLoader
-from main import run_automation_logic
+# Nota: run_automation_logic não é mais usado, mas mantemos o import se necessário por legado, 
+# ou você pode remover "from main import run_automation_logic" se quiser limpar.
+from main import run_automation_logic 
 from src.gui.review_window import ReviewWindow
 from src.automation.orchestrator import Orchestrator
 
@@ -25,7 +28,7 @@ class App(ttk.Window):
         self.last_report_path = None
         
         try:
-            self.loader = DataLoader(lambda x: None) # Guarda o loader para usar depois
+            self.loader = DataLoader(lambda x: None)
             self.lista_materias = sorted(self.loader.materias)
         except:
             self.loader = None
@@ -94,26 +97,29 @@ class App(ttk.Window):
 
     def start_review(self):
         if not self.entry_url.get().strip():
-            Messagebox.show_error("URL do Curso é obrigatória!", "Erro")
+            Messagebox.show_error("URL Obrigatória", "Erro")
             return
         
         self.save_settings()
-        if not self.combo_materia.get():
+        materia_selecionada = self.combo_materia.get()
+        if not materia_selecionada:
             Messagebox.show_error("Selecione uma matéria.", "Erro")
             return
 
         config = self._get_config_dict()
         self.btn_review.config(state="disabled")
-        self.log("🔍 Iniciando revisão... Login necessário.")
+        self.log(f"🔍 Revisando para a matéria: {materia_selecionada}...")
         
         def review_worker():
             try:
-                # Cria orquestrador (VISÍVEL para login)
+                # Cria orquestrador (VISÍVEL para login, se necessário)
                 orc = Orchestrator(config, self.log, headless=False)
+                # O Orchestrator agora decide se usa memória ou faz login no BO
                 data = orc.fetch_and_preview_matches()
-                self.after(0, lambda: self._open_review_window(data, orc.cache_manager, orc.data_loader, config['materia_selecionada']))
+                self.after(0, lambda: self._open_review_window(data, orc.cache_manager, orc.data_loader, materia_selecionada))
             except Exception as e:
                 self.log(f"Erro na revisão: {e}")
+                self.log(traceback.format_exc())
             finally:
                 self.after(0, lambda: self.btn_review.config(state="normal"))
 
@@ -121,29 +127,27 @@ class App(ttk.Window):
 
     def _open_review_window(self, data, cache_mgr, data_loader, materia_selecionada):
         if not data:
-            self.log("⚠️ Nenhuma aula encontrada.")
+            self.log("⚠️ Nenhuma aula encontrada ou cache vazio.")
             return
             
-        # Lista Completa (para busca profunda)
         todos_filtros = data_loader.lista_completa_fallback + \
                         [item for sublist in data_loader.assuntos_por_materia.values() for item in sublist]
         
-        # Lista Específica da Matéria (para mostrar de cara)
         filtros_materia = data_loader.assuntos_por_materia.get(materia_selecionada, [])
 
         def on_save_review(reviewed_data):
             count = 0
+            # Salva no cache os dados revisados
             for aula, filtros in reviewed_data.items():
                 cache_mgr.set(aula, filtros)
                 count += 1
             cache_mgr.save_cache()
-            self.log(f"✅ {count} aulas revisadas e salvas no cache!")
-            Messagebox.show_info("Revisão Salva! Clique em 'INICIAR AUTOMAÇÃO' para gerar os cadernos direto no TEC.", "Sucesso")
+            self.log(f"✅ {count} aulas salvas no cache!")
+            Messagebox.show_info("Revisão Salva! Clique em 'INICIAR AUTOMAÇÃO' para gerar os cadernos.", "Sucesso")
 
-        # Passamos as duas listas agora
         ReviewWindow(self, data, todos_filtros, filtros_materia, on_save_review)
 
-    # ... Métodos auxiliares (save/load/log) iguais ao anterior ...
+    # ... Métodos auxiliares (save/load/log) ...
     def add_entry(self, parent, label, attr_name, show=None):
         ttk.Label(parent, text=label).pack(anchor="w")
         entry = ttk.Entry(parent, show=show)
@@ -166,7 +170,6 @@ class App(ttk.Window):
         del settings["materia_selecionada"]
         del settings["escolaridades"] 
         settings["materia"] = self.combo_materia.get()
-        
         try:
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
                 json.dump(settings, f, indent=4)
@@ -184,10 +187,8 @@ class App(ttk.Window):
             safe_fill(self.entry_tec_pass, "tec_pass")
             safe_fill(self.entry_bo_user, "bo_user")
             safe_fill(self.entry_bo_pass, "bo_pass")
-            
             if "course_url" in settings: safe_fill(self.entry_url, "course_url")
             else: safe_fill(self.entry_url, "url")
-            
             safe_fill(self.entry_banca, "banca")
             safe_fill(self.entry_ano, "ano")
             if "materia" in settings and settings["materia"] in self.lista_materias:
@@ -219,6 +220,7 @@ class App(ttk.Window):
         }
 
     def start_thread(self):
+        """Inicia o processo de automação no TEC (Fase 2)"""
         if not self.entry_url.get().strip():
             Messagebox.show_error("URL Obrigatória", "Erro")
             return
@@ -231,19 +233,37 @@ class App(ttk.Window):
         self.btn_start.config(state="disabled")
         self.btn_review.config(state="disabled")
         
-        t = threading.Thread(target=self.run_logic_wrapper, args=(config,))
+        # Chama o worker dedicado à automação do TEC
+        t = threading.Thread(target=self.run_tec_worker, args=(config,))
         t.daemon = True
         t.start()
 
-    def run_logic_wrapper(self, config):
+    def run_tec_worker(self, config):
+        """
+        Worker específico para a fase do TEC Concursos (Botão 2).
+        Lê o cache/memória e cria os cadernos, sem acessar o BackOffice.
+        """
         try:
-            report_path = run_automation_logic(config, self.log)
+            self.log("="*40)
+            self.log("🚀 FASE 2: INICIANDO GERAÇÃO NO TEC")
+            self.log("="*40)
+            
+            # Instancia Orchestrator apenas para rodar a fase TEC
+            orc = Orchestrator(config, self.log, headless=False)
+            
+            # Chama o método dedicado à fase 2
+            report_path = orc.run_tec_automation()
+            
             if report_path and os.path.exists(report_path):
                 self.last_report_path = report_path
                 self.after(0, lambda: self.btn_report.config(state="normal", bootstyle="info"))
-                self.log(f"✅ Relatório: {report_path}")
+                self.log(f"✅ Processo Finalizado! Relatório: {report_path}")
+            else:
+                self.log("⏹ Processo finalizado (sem relatório gerado ou erro).")
+
         except Exception as e:
-            self.log(f"ERRO: {e}")
+            self.log(f"❌ ERRO CRÍTICO NA GUI: {e}")
+            self.log(traceback.format_exc())
         finally:
             self.after(0, lambda: self.btn_start.config(state="normal"))
             self.after(0, lambda: self.btn_review.config(state="normal"))

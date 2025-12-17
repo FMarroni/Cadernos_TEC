@@ -1,20 +1,19 @@
-# Ficheiro: src/cache_manager.py
+# src/cache_manager.py
 import os
 import json
-import traceback
 from typing import Callable, Dict, Any, List
 
 CACHE_DIR = "cache"
 CACHE_FILE = os.path.join(CACHE_DIR, "matches_cache.json")
 
 class CacheManager:
-    """
-    Gerencia o cache de resultados de match (Aula -> Filtros).
-    """
-    
     def __init__(self, log_callback: Callable[..., None]):
         self.log = log_callback
-        self.cache_data: Dict[str, List[str]] = {}
+        # Estrutura interna agora terá metadados
+        self.cache_structure: Dict[str, Any] = {
+            "meta": {"course_id": None},
+            "data": {}
+        }
         self.has_changed: bool = False
 
         try:
@@ -29,32 +28,46 @@ class CacheManager:
         try:
             if os.path.exists(CACHE_FILE):
                 with open(CACHE_FILE, 'r', encoding='utf-8') as f:
-                    self.cache_data = json.load(f)
+                    loaded = json.load(f)
+                    # Migração simples para estrutura nova se for arquivo antigo
+                    if "meta" not in loaded:
+                        self.cache_structure["data"] = loaded
+                    else:
+                        self.cache_structure = loaded
             else:
-                self.cache_data = {}
+                self.reset_cache()
         except Exception as e:
             self.log(f"⚠️ Erro ao ler cache: {e}")
-            self.cache_data = {}
+            self.reset_cache()
 
-    def get(self, key: str) -> List[str] | None:
-        return self.cache_data.get(key)
+    def reset_cache(self):
+        self.cache_structure = {"meta": {"course_id": None}, "data": {}}
+        self.has_changed = True
 
-    def set(self, key: str, value: List[str]):
-        if self.cache_data.get(key) != value:
-            self.cache_data[key] = value
+    def get_course_id(self) -> str | None:
+        return self.cache_structure["meta"].get("course_id")
+
+    def set_course_id(self, course_id: str):
+        if self.get_course_id() != course_id:
+            self.cache_structure["meta"]["course_id"] = course_id
             self.has_changed = True
 
-    # --- NOVO MÉTODO PARA O FLUXO OTIMIZADO ---
+    def get(self, key: str) -> List[str] | None:
+        return self.cache_structure["data"].get(key)
+
+    def set(self, key: str, value: List[str]):
+        if self.cache_structure["data"].get(key) != value:
+            self.cache_structure["data"][key] = value
+            self.has_changed = True
+
     def get_all_tasks_formatted(self) -> List[Dict]:
-        """
-        Retorna todo o cache formatado como lista de tarefas para o Orquestrador.
-        Isso permite pular a etapa do Backoffice.
-        """
+        """Retorna tarefas formatadas para o Orchestrator (TEC)"""
         tarefas = []
-        if not self.cache_data:
+        data = self.cache_structure["data"]
+        if not data:
             return []
             
-        for aula, filtros in self.cache_data.items():
+        for aula, filtros in data.items():
             tarefas.append({
                 "nome_caderno": f"Caderno - {aula}",
                 "materias": filtros,
@@ -62,19 +75,13 @@ class CacheManager:
             })
         return tarefas
 
-    def clear_cache(self):
-        """Limpa o cache atual (útil ao iniciar nova revisão)"""
-        self.cache_data = {}
-        self.has_changed = True
-        self.save_cache()
-
     def save_cache(self):
         if not self.has_changed:
             return
 
         try:
             with open(CACHE_FILE, 'w', encoding='utf-8') as f:
-                json.dump(self.cache_data, f, indent=4, ensure_ascii=False)
+                json.dump(self.cache_structure, f, indent=4, ensure_ascii=False)
             self.has_changed = False
         except Exception as e:
             self.log(f"❌ Erro ao salvar cache: {e}")

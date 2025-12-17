@@ -41,3 +41,11 @@ relatorios/
 
 # Ignora a pasta de cache
 cache/
+
+#Ignorar zipados
+*.zip
+dist/
+build/
+*.exedist.zip
+*.zip
+last_run_data.json

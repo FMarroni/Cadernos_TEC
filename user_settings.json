@@ -7,7 +7,7 @@
     "banca": "VUNESP",
     "ano": "2023, 2024",
     "escolaridade": {
-        "Superior": true,
+        "Superior": false,
         "M\u00e9dio": true,
         "Fundamental": false
     },

@@ -18,3 +18,17 @@ jinja2
 # Interface Gráfica (GUI)
 
 ttkbootstrap
+
+#Integração Google Sheets
+
+requests
+beautifulsoup4
+pandas
+selenium
+webdriver_manager
+openpyxl
+python-docx
+tk
+ttkbootstrap
+gspread
+oauth2client
