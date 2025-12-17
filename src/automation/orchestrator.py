@@ -96,19 +96,20 @@ class Orchestrator:
             
         return dados_para_review
 
-    def run_tec_automation(self) -> str:
+    def run_tec_automation(self):
         """
         BOTÃO 2: Apenas execução no TEC (Baseado no Cache/Revisão)
+        Retorna uma tupla: (caminho_relatorio, lista_dados_finais)
         """
         self.log("🚀 Iniciando fase de automação no TEC Concursos...")
         
-        # 1. Carrega tarefas da memória (definidas na Revisão)
+        # 1. Carrega tarefas da memória
         tarefas = self.cache_manager.get_all_tasks_formatted()
         
         if not tarefas:
             self.log("❌ Nenhuma tarefa encontrada na memória.")
             self.log("⚠️ Por favor, execute 'Revisar Matches' primeiro e Salve a revisão.")
-            return None
+            return None, []
 
         self.log(f"📂 {len(tarefas)} cadernos prontos para criação.")
 
@@ -127,7 +128,7 @@ class Orchestrator:
                 
                 if not cadernos_validos:
                     self.log("⚠️ Nenhuma aula possui matérias vinculadas. Nada a criar.")
-                    return None
+                    return None, []
 
                 resultados = tec.criar_multiplos_cadernos(cadernos_validos)
                 
@@ -149,7 +150,9 @@ class Orchestrator:
                     final_res.append(t)
 
                 gen = ReportGenerator(self.log)
-                return gen.generate_report(self.user_data, final_res)
+                report_path = gen.generate_report(self.user_data, final_res)
+                
+                return report_path, final_res
             else:
                 self.log("❌ Falha no login do TEC.")
 
@@ -158,9 +161,8 @@ class Orchestrator:
             self.log(traceback.format_exc())
         finally:
             automation.stop()
-        return None
+        return None, []
 
-    # ... (Os métodos _match_aulas_inteligente e _prepare_filters continuam iguais) ...
     def _match_aulas_inteligente(self, aulas_bo, return_details=False):
         materia_alvo = self.user_data.get("materia_selecionada")
         def limpar(nome): return re.sub(r'(?i)aula\s+\d+\s*[:.-]\s*', '', nome).strip()
@@ -185,8 +187,16 @@ class Orchestrator:
     def _prepare_filters(self):
         def to_list(s): return [x.strip() for x in s.split(',')] if s else []
         def to_int_list(s): return [int(x) for x in to_list(s) if x.isdigit()]
+        
+        # --- Lógica para Áreas (Sem limpeza regex) ---
+        area_selecionada = self.user_data.get('area_carreira', '')
+        areas_lista = []
+        if area_selecionada:
+            areas_lista.append(area_selecionada) # Usa texto original
+
         return {
             "bancas": to_list(self.user_data.get('banca', '')),
             "anos": to_int_list(self.user_data.get('ano', '')),
-            "escolaridades": to_list(self.user_data.get('escolaridade', '')) 
+            "escolaridades": to_list(self.user_data.get('escolaridade', '')),
+            "areas": areas_lista
         }
