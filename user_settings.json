@@ -8,10 +8,10 @@
     "banca": "VUNESP",
     "ano": "2023, 2024",
     "escolaridade": {
-        "Superior": false,
+        "Superior": true,
         "M\u00e9dio": true,
         "Fundamental": false
     },
-    "area_carreira": "Todo o conte\u00fado de 'Judici\u00e1ria (Servidores)'",
-    "materia": "Direito Penal"
+    "area_carreira": "Servidores da Justi\u00e7a Federal (TRFs, STF e STJ)",
+    "materia": "Direito Penal Militar"
 }

@@ -79,10 +79,13 @@ class App(ttk.Window):
     def __init__(self):
         super().__init__(themename="litera")
         self.title("Automação TEC - IA Inteligente + Integração Sheets")
-        self.geometry("1200x980") # Altura ajustada para novo campo
+        self.geometry("1200x800") # Tamanho inicial
+        
+        # Variáveis de Estado
         self.last_report_path = None
         self.last_results_data = None
         
+        # Inicialização do Loader
         try:
             self.loader = DataLoader(lambda x: None)
             self.lista_materias = sorted(self.loader.materias)
@@ -90,84 +93,203 @@ class App(ttk.Window):
             self.loader = None
             self.lista_materias = []
 
+        # --- CONFIGURAÇÃO DE SCROLL ---
+        self._setup_scroll_system()
+
+        # Layout e Configurações
         self.create_layout()
         self.load_settings()
 
-    def create_layout(self):
-        self.grid_columnconfigure(0, weight=3)
-        self.grid_columnconfigure(1, weight=7)
-        self.grid_rowconfigure(0, weight=1)
+    def _setup_scroll_system(self):
+        """
+        Configura o sistema de Canvas + Scrollbars (Vertical e Horizontal).
+        """
+        # 1. Container principal
+        self.main_container = ttk.Frame(self)
+        self.main_container.pack(fill=BOTH, expand=True)
 
-        # Painel Esquerdo
-        control_panel = ttk.Frame(self, padding=10)
+        # Configura o Grid do container principal para acomodar as barras
+        self.main_container.grid_rowconfigure(0, weight=1)
+        self.main_container.grid_columnconfigure(0, weight=1)
+
+        # 2. Canvas
+        self.canvas = ttk.Canvas(self.main_container)
+        self.canvas.grid(row=0, column=0, sticky="nsew")
+
+        # 3. Scrollbar Vertical
+        self.scrollbar_y = ttk.Scrollbar(self.main_container, orient=VERTICAL, command=self.canvas.yview)
+        self.scrollbar_y.grid(row=0, column=1, sticky="ns")
+
+        # 4. Scrollbar Horizontal (NOVA)
+        self.scrollbar_x = ttk.Scrollbar(self.main_container, orient=HORIZONTAL, command=self.canvas.xview)
+        self.scrollbar_x.grid(row=1, column=0, sticky="ew")
+
+        # Conecta o Canvas às Scrollbars
+        self.canvas.configure(yscrollcommand=self.scrollbar_y.set, xscrollcommand=self.scrollbar_x.set)
+        
+        # 5. Bindings para MouseWheel
+        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel) # Windows
+        self.canvas.bind_all("<Button-4>", self._on_mousewheel)   # Linux Up
+        self.canvas.bind_all("<Button-5>", self._on_mousewheel)   # Linux Down
+        # Shift + Scroll para rolagem horizontal (opcional, mas útil)
+        self.canvas.bind_all("<Shift-MouseWheel>", self._on_shift_mousewheel)
+
+        # 6. O Frame interno que conterá todos os widgets
+        self.scrollable_frame = ttk.Frame(self.canvas)
+
+        # Cria a janela dentro do canvas
+        self.canvas_window = self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
+
+        # Evento para atualizar a região de scroll quando o conteúdo muda
+        self.scrollable_frame.bind("<Configure>", self._on_frame_configure)
+        # Evento para redimensionar o frame interno (lógica inteligente para horizontal)
+        self.canvas.bind("<Configure>", self._on_canvas_configure)
+
+    def _on_frame_configure(self, event):
+        """Atualiza a região de rolagem para englobar todo o conteúdo"""
+        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+    def _on_canvas_configure(self, event):
+        """
+        Ajusta a largura do frame interno.
+        Se a janela for maior que o conteúdo mínimo, expande o frame para preencher (fica bonito).
+        Se a janela for menor, mantém o tamanho mínimo do frame (ativa a barra horizontal).
+        """
+        min_width = self.scrollable_frame.winfo_reqwidth()
+        
+        if event.width >= min_width:
+            # Janela larga: expande o frame para ocupar a largura total
+            self.canvas.itemconfig(self.canvas_window, width=event.width)
+        else:
+            # Janela estreita: fixa no tamanho mínimo do conteúdo (permite scroll horizontal)
+            self.canvas.itemconfig(self.canvas_window, width=min_width)
+
+    def _on_mousewheel(self, event):
+        """Trata o scroll vertical do mouse"""
+        if self.canvas.winfo_exists():
+            # Verifica se há barra de rolagem vertical ativa (scrollregion > height)
+            if self.canvas.bbox("all")[3] > self.canvas.winfo_height():
+                if event.num == 5 or event.delta == -120:
+                    self.canvas.yview_scroll(1, "units")
+                elif event.num == 4 or event.delta == 120:
+                    self.canvas.yview_scroll(-1, "units")
+
+    def _on_shift_mousewheel(self, event):
+        """Trata o scroll horizontal (Shift + MouseWheel)"""
+        if self.canvas.winfo_exists():
+            if event.num == 5 or event.delta == -120:
+                self.canvas.xview_scroll(1, "units")
+            elif event.num == 4 or event.delta == 120:
+                self.canvas.xview_scroll(-1, "units")
+
+    def create_layout(self):
+        """
+        Cria o layout dentro do self.scrollable_frame em vez de self.
+        Agora organizado com LabelFrames para melhor agrupamento visual.
+        """
+        # Configuração do Grid no Frame Rolável
+        self.scrollable_frame.grid_columnconfigure(0, weight=3)
+        self.scrollable_frame.grid_columnconfigure(1, weight=7)
+        self.scrollable_frame.grid_rowconfigure(0, weight=1)
+
+        # === PAINEL ESQUERDO: CONTROLES ===
+        control_panel = ttk.Frame(self.scrollable_frame, padding=10)
         control_panel.grid(row=0, column=0, sticky="nsew")
         
-        ttk.Label(control_panel, text="Configurações", font=("Helvetica", 16, "bold")).pack(pady=10)
+        # Título
+        ttk.Label(control_panel, text="Painel de Controle", font=("Helvetica", 16, "bold"), bootstyle="primary").pack(pady=(0, 10))
 
-        # Inputs Básicos
-        self.add_entry(control_panel, "Email TEC:", "tec_user")
-        self.add_entry(control_panel, "Senha TEC:", "tec_pass", show="*")
-        self.add_entry(control_panel, "User BackOffice:", "bo_user")
-        self.add_entry(control_panel, "Senha BackOffice:", "bo_pass", show="*")
-        
-        # Webhook
-        ttk.Label(control_panel, text="Webhook Google Sheets:", font=("Helvetica", 10, "bold"), bootstyle="warning").pack(anchor="w", pady=(10,0))
-        self.entry_webapp_url = ttk.Entry(control_panel)
-        self.entry_webapp_url.pack(fill="x", pady=5)
-        
-        ttk.Label(control_panel, text="URL do Curso:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10,0))
-        self.entry_url = ttk.Entry(control_panel)
-        self.entry_url.pack(fill="x", pady=5)
+        # --- 1. SEÇÃO: CREDENCIAIS ---
+        lbl_creds = ttk.Labelframe(control_panel, text="🔐 Credenciais de Acesso", padding=10, bootstyle="info")
+        lbl_creds.pack(fill=X, pady=5)
 
-        ttk.Label(control_panel, text="Matéria (Obrigatório):", font=("Helvetica", 10, "bold"), bootstyle="primary").pack(anchor="w", pady=(10,0))
-        self.combo_materia = ttk.Combobox(control_panel, values=self.lista_materias, state="readonly")
+        self.add_entry(lbl_creds, "Email TEC:", "tec_user")
+        self.add_entry(lbl_creds, "Senha TEC:", "tec_pass", show="*")
+        self.add_entry(lbl_creds, "User BackOffice:", "bo_user")
+        self.add_entry(lbl_creds, "Senha BackOffice:", "bo_pass", show="*")
+        
+        # --- 2. SEÇÃO: INTEGRAÇÕES ---
+        lbl_integ = ttk.Labelframe(control_panel, text="🔗 Integrações", padding=10, bootstyle="warning")
+        lbl_integ.pack(fill=X, pady=5)
+        
+        ttk.Label(lbl_integ, text="Webhook Google Sheets:", font=("Helvetica", 9, "bold")).pack(anchor="w")
+        self.entry_webapp_url = ttk.Entry(lbl_integ)
+        self.entry_webapp_url.pack(fill=X, pady=5)
+        
+        # --- 3. SEÇÃO: CONFIGURAÇÃO DO CADERNO ---
+        lbl_config = ttk.Labelframe(control_panel, text="⚙️ Definições do Caderno", padding=10, bootstyle="success")
+        lbl_config.pack(fill=X, pady=5)
+
+        ttk.Label(lbl_config, text="URL do Curso (BackOffice):", font=("Helvetica", 9)).pack(anchor="w")
+        self.entry_url = ttk.Entry(lbl_config)
+        self.entry_url.pack(fill=X, pady=5)
+
+        ttk.Label(lbl_config, text="Matéria (Obrigatório):", font=("Helvetica", 9, "bold"), bootstyle="inverse-success").pack(anchor="w", pady=(5,0))
+        self.combo_materia = ttk.Combobox(lbl_config, values=self.lista_materias, state="readonly")
         if self.lista_materias: self.combo_materia.current(0) 
-        self.combo_materia.pack(fill="x", pady=5)
+        self.combo_materia.pack(fill=X, pady=5)
 
-        # --- NOVO FILTRO: ÁREA (CARREIRA) ---
-        ttk.Label(control_panel, text="Área / Carreira:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10,0))
-        self.combo_area = ttk.Combobox(control_panel, values=LISTA_AREAS_TEC, state="readonly")
-        self.combo_area.pack(fill="x", pady=5)
-        # ------------------------------------
+        # Filtro: Área
+        ttk.Label(lbl_config, text="Área / Carreira:", font=("Helvetica", 9)).pack(anchor="w", pady=(5,0))
+        self.combo_area = ttk.Combobox(lbl_config, values=LISTA_AREAS_TEC, state="readonly")
+        self.combo_area.pack(fill=X, pady=5)
 
-        self.add_entry(control_panel, "Banca (ex: VUNESP):", "banca")
-        self.add_entry(control_panel, "Ano (ex: 2023, 2024):", "ano")
+        self.add_entry(lbl_config, "Banca (ex: VUNESP):", "banca")
+        self.add_entry(lbl_config, "Ano (ex: 2023, 2024):", "ano")
 
         # Escolaridade
-        ttk.Label(control_panel, text="Escolaridade:", font=("Helvetica", 10, "bold")).pack(anchor="w", pady=(10,0))
-        self.frame_escolaridade = ttk.Frame(control_panel)
-        self.frame_escolaridade.pack(fill="x", pady=5)
+        ttk.Label(lbl_config, text="Escolaridade:", font=("Helvetica", 9)).pack(anchor="w", pady=(5,0))
+        self.frame_escolaridade = ttk.Frame(lbl_config)
+        self.frame_escolaridade.pack(fill=X, pady=5)
         self.vars_escolaridade = {
             "Superior": ttk.BooleanVar(value=False),
             "Médio": ttk.BooleanVar(value=False),
             "Fundamental": ttk.BooleanVar(value=False)
         }
         for nivel, var in self.vars_escolaridade.items():
-            ttk.Checkbutton(self.frame_escolaridade, text=nivel, variable=var, bootstyle="round-toggle").pack(side="left", padx=5)
+            ttk.Checkbutton(self.frame_escolaridade, text=nivel, variable=var, bootstyle="round-toggle").pack(side=LEFT, padx=5)
 
-        # --- BOTÕES ---
-        self.btn_review = ttk.Button(control_panel, text="🔍 Revisar Matches (IA)", bootstyle="info", command=self.start_review)
-        self.btn_review.pack(pady=(20, 5), fill="x")
+        # --- 4. ÁREA DE AÇÃO ---
+        frame_actions = ttk.Frame(control_panel, padding=(0, 10))
+        frame_actions.pack(fill=X, pady=10)
 
-        self.btn_start = ttk.Button(control_panel, text="▶ INICIAR AUTOMAÇÃO", bootstyle="success", command=self.start_thread)
-        self.btn_start.pack(pady=5, fill="x")
+        self.btn_review = ttk.Button(frame_actions, text="🔍 1. Revisar Matches (IA)", bootstyle="info", command=self.start_review)
+        self.btn_review.pack(fill=X, pady=5)
+
+        self.btn_start = ttk.Button(frame_actions, text="▶ 2. INICIAR AUTOMAÇÃO", bootstyle="success", command=self.start_thread)
+        self.btn_start.pack(fill=X, pady=5)
 
         # Botões de Saída
         frame_saida = ttk.Frame(control_panel)
-        frame_saida.pack(fill="x", pady=5)
+        frame_saida.pack(fill=X, pady=5)
         
-        self.btn_report = ttk.Button(frame_saida, text="Abrir Relatório", bootstyle="secondary", state="disabled", command=self.open_report)
-        self.btn_report.pack(side="left", fill="x", expand=True, padx=(0, 2))
+        self.btn_report = ttk.Button(frame_saida, text="📄 Abrir Relatório", bootstyle="secondary", state="disabled", command=self.open_report)
+        self.btn_report.pack(side=LEFT, fill=X, expand=True, padx=(0, 2))
 
-        self.btn_send_sheet = ttk.Button(frame_saida, text="Enviar p/ Planilha", bootstyle="warning", state="disabled", command=self.send_to_sheet_thread)
-        self.btn_send_sheet.pack(side="right", fill="x", expand=True, padx=(2, 0))
+        self.btn_send_sheet = ttk.Button(frame_saida, text="📤 Enviar p/ Planilha", bootstyle="warning", state="disabled", command=self.send_to_sheet_thread)
+        self.btn_send_sheet.pack(side=RIGHT, fill=X, expand=True, padx=(2, 0))
 
-        # Logs
-        log_panel = ttk.Frame(self, padding=10)
+        # === PAINEL DIREITO: LOGS ===
+        log_panel = ttk.Frame(self.scrollable_frame, padding=10)
         log_panel.grid(row=0, column=1, sticky="nsew")
-        ttk.Label(log_panel, text="Logs do Processo", font=("Helvetica", 12, "bold")).pack(anchor="w")
+        
+        # Cabeçalho dos Logs
+        header_log = ttk.Frame(log_panel)
+        header_log.pack(fill=X, pady=(0, 5))
+        
+        ttk.Label(header_log, text="Logs do Processo", font=("Helvetica", 12, "bold")).pack(side=LEFT)
+        # REMOVIDO o argumento 'size="sm"' que causava erro no ttkbootstrap
+        ttk.Button(header_log, text="🗑️ Limpar Logs", bootstyle="outline-secondary", command=self.clear_logs).pack(side=RIGHT)
+        
+        # Área de texto com scroll próprio
         self.log_area = ScrolledText(log_panel, state="disabled", height=40)
-        self.log_area.pack(fill="both", expand=True)
+        self.log_area.pack(fill=BOTH, expand=True)
+
+    def clear_logs(self):
+        """Limpa a área de logs"""
+        self.log_area.config(state="normal")
+        self.log_area.delete("1.0", "end")
+        self.log_area.config(state="disabled")
 
     def start_review(self):
         if not self.entry_url.get().strip():
@@ -219,9 +341,9 @@ class App(ttk.Window):
         ReviewWindow(self, data, todos_filtros, filtros_materia, on_save_review)
 
     def add_entry(self, parent, label, attr_name, show=None):
-        ttk.Label(parent, text=label).pack(anchor="w")
+        ttk.Label(parent, text=label, font=("Helvetica", 9)).pack(anchor="w")
         entry = ttk.Entry(parent, show=show)
-        entry.pack(fill="x", pady=(0, 5))
+        entry.pack(fill=X, pady=(0, 5))
         setattr(self, f"entry_{attr_name}", entry)
 
     def log(self, msg):
@@ -241,7 +363,6 @@ class App(ttk.Window):
         del settings["escolaridades"] 
         settings["materia"] = self.combo_materia.get()
         settings["webapp_url"] = self.entry_webapp_url.get()
-        # Salva a Área
         settings["area_carreira"] = self.combo_area.get()
         
         try:
@@ -272,7 +393,6 @@ class App(ttk.Window):
             if "escolaridade" in settings:
                 for key, val in settings["escolaridade"].items():
                     if key in self.vars_escolaridade: self.vars_escolaridade[key].set(val)
-            # Carrega Área
             if "area_carreira" in settings and settings["area_carreira"] in LISTA_AREAS_TEC:
                 self.combo_area.set(settings["area_carreira"])
                 
@@ -298,7 +418,7 @@ class App(ttk.Window):
             "escolaridade": ",".join(escolaridades_selecionadas),
             "escolaridades": escolaridades_selecionadas,
             "materia_selecionada": self.combo_materia.get(),
-            "area_carreira": self.combo_area.get() # Inclui a nova configuração
+            "area_carreira": self.combo_area.get()
         }
 
     def start_thread(self):
