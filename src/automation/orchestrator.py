@@ -1,7 +1,6 @@
-# src/automation/orchestrator.py
 import traceback
 import re
-from typing import Dict, Any, Callable, List
+from typing import Dict, Any, Callable, List, Union
 from data.data_loader import DataLoader
 from src.cache_manager import CacheManager
 from .web_automation import WebAutomation
@@ -43,6 +42,8 @@ class Orchestrator:
         dados_para_review = []
         
         # 1. VERIFICAÇÃO DE MEMÓRIA (Pulo do Gato para evitar Login BO)
+        # Nota: Idealmente verificaríamos se as matérias selecionadas mudaram para invalidar o cache,
+        # mas por enquanto mantemos a lógica baseada no ID do curso para performance.
         if current_id and current_id == cached_id:
             self.log(f"🧠 Curso ID {current_id} reconhecido na memória.")
             self.log("⏩ Pulando acesso ao BackOffice e usando dados salvos.")
@@ -120,6 +121,8 @@ class Orchestrator:
             
             # 2. Login e Criação no TEC
             filtros_tec = self._prepare_filters()
+            
+            # Passa os filtros globais (incluindo lista de matérias) para o executor
             tec = TecAutomationPerfeito(page, self.log, filtros_tec)
             
             if tec.login(self.user_data['tec_user'], self.user_data['tec_pass']):
@@ -143,6 +146,7 @@ class Orchestrator:
                         if not t.get('success'):
                             t.update({"success": False, "erro": "Não mapeado/Ignorado", "num_questoes": 0})
                     
+                    # Formata display dos filtros usados
                     if 'materias' in t and isinstance(t['materias'], list):
                         t['filtros_ia'] = ", ".join(t['materias'])
                     else:
@@ -165,14 +169,25 @@ class Orchestrator:
 
     def _match_aulas_inteligente(self, aulas_bo, return_details=False):
         materia_alvo = self.user_data.get("materia_selecionada")
+        
         def limpar(nome): return re.sub(r'(?i)aula\s+\d+\s*[:.-]\s*', '', nome).strip()
         aulas_limpas = [limpar(a) for a in aulas_bo]
 
-        if materia_alvo:
+        # Verifica se há seleção (Lista não vazia ou String não vazia)
+        has_selection = False
+        if isinstance(materia_alvo, list):
+            has_selection = len(materia_alvo) > 0
+        elif materia_alvo:
+            has_selection = True
+
+        if has_selection:
+            # Passa a lista (ou string) para o matcher, que agora suporta multisseleção
+            self.log(f"🔍 Buscando assuntos nas matérias selecionadas: {materia_alvo}")
             matches = self.text_matcher.find_best_matches_filtered_batch(
                 query_texts=aulas_limpas, target_materia=materia_alvo
             )
         else:
+            self.log("🔍 Busca Hierárquica Global (nenhuma matéria específica selecionada)...")
             matches = self.text_matcher.find_best_matches_hierarquico_batch(
                 query_texts=aulas_limpas
             )
@@ -194,9 +209,18 @@ class Orchestrator:
         if area_selecionada:
             areas_lista.append(area_selecionada) # Usa texto original
 
+        # --- Lógica para Matérias (Multisseleção) ---
+        raw_materias = self.user_data.get("materia_selecionada")
+        lista_materias = []
+        if isinstance(raw_materias, list):
+            lista_materias = raw_materias
+        elif isinstance(raw_materias, str) and raw_materias:
+            lista_materias = [raw_materias]
+
         return {
             "bancas": to_list(self.user_data.get('banca', '')),
             "anos": to_int_list(self.user_data.get('ano', '')),
             "escolaridades": to_list(self.user_data.get('escolaridade', '')),
-            "areas": areas_lista
+            "areas": areas_lista,
+            "materias": lista_materias # Passa a lista de matérias selecionadas para a automação
         }

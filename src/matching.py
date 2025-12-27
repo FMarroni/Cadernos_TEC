@@ -1,11 +1,10 @@
-# src/matching.py (VERSÃO 9.0 - HUMAN IN THE LOOP)
 import torch
 import os
 import pickle
 import re
 import unicodedata
 from sentence_transformers import SentenceTransformer, util
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Union
 
 CACHE_DIR = "cache/embeddings"
 MATERIAS_EMBEDDINGS_CACHE = os.path.join(CACHE_DIR, "materias_embeddings_v6.pkl")
@@ -41,17 +40,50 @@ class TextMatcher:
         self._carregar_cache_assuntos()
         self.fallback_embeddings = self._load_or_compute_embeddings(self.lista_fallback_normalizada, FALLBACK_EMBEDDINGS_CACHE, "fallback")
 
-    def find_best_matches_filtered_batch(self, query_texts: List[str], target_materia: str, top_k_assuntos: int = 3, threshold_assunto: float = 0.60) -> List[List[Dict[str, Any]]]:
+    def find_best_matches_filtered_batch(self, query_texts: List[str], target_materia: Union[str, List[str]], top_k_assuntos: int = 3, threshold_assunto: float = 0.60) -> List[List[Dict[str, Any]]]:
         """
         Retorna lista de listas contendo dicts: {'termo': str, 'score': float, 'origem': str}
+        Suporta String única ou Lista de Strings para target_materia.
+        Concatena embeddings de múltiplas matérias para busca unificada.
         """
-        # Se a matéria não existe, usa o método antigo (hierárquico)
-        if target_materia not in self.dict_assuntos_por_materia:
+        
+        # 1. Normalização: Garante que target_materia seja sempre uma lista
+        materias_alvo = []
+        if isinstance(target_materia, list):
+            materias_alvo = target_materia
+        elif target_materia:
+            materias_alvo = [target_materia]
+
+        # 2. Coleta de dados (Tensores e Textos) das matérias solicitadas
+        tensors_to_cat = []
+        texts_to_cat = []
+
+        for materia in materias_alvo:
+            # Verifica se a matéria existe nos dicionários carregados
+            if materia in self.dict_assuntos_por_materia and materia in self.assuntos_embeddings_por_materia:
+                emb = self.assuntos_embeddings_por_materia[materia]
+                txt = self.dict_assuntos_por_materia[materia]
+                
+                # Verifica integridade (se tem embedding e texto)
+                if emb is not None and len(txt) > 0:
+                    tensors_to_cat.append(emb)
+                    texts_to_cat.extend(txt)
+        
+        # 3. Fallback se nenhuma matéria válida for encontrada
+        if not tensors_to_cat:
+            # Se a lista estiver vazia ou as matérias não existirem, tenta o hierárquico
             return self.find_best_matches_hierarquico_batch(query_texts)
 
-        assuntos_emb = self.assuntos_embeddings_por_materia.get(target_materia)
-        assuntos_txt = self.dict_assuntos_por_materia.get(target_materia, [])
-        
+        # 4. Concatenação dos Embeddings
+        try:
+            # Junta todos os tensores das matérias selecionadas em um único tensor grande
+            assuntos_emb = torch.cat(tensors_to_cat, dim=0)
+            assuntos_txt = texts_to_cat
+        except Exception as e:
+            self.log(f"❌ Erro ao concatenar embeddings para multiseleção: {e}")
+            return [[] for _ in query_texts]
+
+        # 5. Processamento das Queries
         lista_resultados = []
         
         for query in query_texts:
@@ -65,7 +97,11 @@ class TextMatcher:
 
             for chunk in chunks:
                 query_emb = self.model.encode(chunk, convert_to_tensor=True, device=self.device)
+                
+                # Compara contra o tensor unificado de todas as matérias selecionadas
                 cos_scores = util.cos_sim(query_emb, assuntos_emb)[0]
+                
+                # Pega os Top K globais
                 top_indices = torch.topk(cos_scores, k=min(top_k_assuntos, len(assuntos_txt)))
                 
                 for score, idx in zip(top_indices.values, top_indices.indices):
@@ -74,7 +110,7 @@ class TextMatcher:
                         matches_aula.append({
                             "termo": assuntos_txt[idx.item()],
                             "score": sc,
-                            "origem": "Filtro IA"
+                            "origem": "Filtro IA (Multi)"
                         })
 
             # Remove duplicatas mantendo a maior nota

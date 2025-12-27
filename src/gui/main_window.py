@@ -2,7 +2,9 @@
 import ttkbootstrap as ttk
 from ttkbootstrap.constants import *
 from ttkbootstrap.dialogs import Messagebox
+from ttkbootstrap.scrolled import ScrolledFrame
 from tkinter.scrolledtext import ScrolledText
+from tkinter import StringVar, VERTICAL, HORIZONTAL
 import threading
 import os
 import sys
@@ -84,6 +86,7 @@ class App(ttk.Window):
         # Variáveis de Estado
         self.last_report_path = None
         self.last_results_data = None
+        self.materia_selecionada = [] # Armazena a LISTA de matérias selecionadas
         
         # Inicialização do Loader
         try:
@@ -168,7 +171,8 @@ class App(ttk.Window):
         """Trata o scroll vertical do mouse"""
         if self.canvas.winfo_exists():
             # Verifica se há barra de rolagem vertical ativa (scrollregion > height)
-            if self.canvas.bbox("all")[3] > self.canvas.winfo_height():
+            bbox = self.canvas.bbox("all")
+            if bbox and bbox[3] > self.canvas.winfo_height():
                 if event.num == 5 or event.delta == -120:
                     self.canvas.yview_scroll(1, "units")
                 elif event.num == 4 or event.delta == 120:
@@ -184,8 +188,7 @@ class App(ttk.Window):
 
     def create_layout(self):
         """
-        Cria o layout dentro do self.scrollable_frame em vez de self.
-        Agora organizado com LabelFrames para melhor agrupamento visual.
+        Cria o layout dentro do self.scrollable_frame.
         """
         # Configuração do Grid no Frame Rolável
         self.scrollable_frame.grid_columnconfigure(0, weight=3)
@@ -224,10 +227,16 @@ class App(ttk.Window):
         self.entry_url = ttk.Entry(lbl_config)
         self.entry_url.pack(fill=X, pady=5)
 
-        ttk.Label(lbl_config, text="Matéria (Obrigatório):", font=("Helvetica", 9, "bold"), bootstyle="inverse-success").pack(anchor="w", pady=(5,0))
-        self.combo_materia = ttk.Combobox(lbl_config, values=self.lista_materias, state="readonly")
-        if self.lista_materias: self.combo_materia.current(0) 
-        self.combo_materia.pack(fill=X, pady=5)
+        # --- CAMPO MATÉRIA (MULTISSELEÇÃO) ---
+        ttk.Label(lbl_config, text="Matéria(s) (Obrigatório):", font=("Helvetica", 9, "bold"), bootstyle="inverse-success").pack(anchor="w", pady=(5,0))
+        
+        self.materia_display_var = StringVar()
+        # Entry apenas leitura para mostrar o que foi selecionado
+        self.entry_materia_display = ttk.Entry(lbl_config, textvariable=self.materia_display_var, state="readonly")
+        self.entry_materia_display.pack(fill=X, pady=(0, 2))
+        
+        # Botão para abrir o seletor
+        ttk.Button(lbl_config, text="Selecionar Matérias...", bootstyle="outline-success", command=self.open_materia_multiselect).pack(fill=X, pady=(0, 5))
 
         # Filtro: Área
         ttk.Label(lbl_config, text="Área / Carreira:", font=("Helvetica", 9)).pack(anchor="w", pady=(5,0))
@@ -278,12 +287,96 @@ class App(ttk.Window):
         header_log.pack(fill=X, pady=(0, 5))
         
         ttk.Label(header_log, text="Logs do Processo", font=("Helvetica", 12, "bold")).pack(side=LEFT)
-        # REMOVIDO o argumento 'size="sm"' que causava erro no ttkbootstrap
         ttk.Button(header_log, text="🗑️ Limpar Logs", bootstyle="outline-secondary", command=self.clear_logs).pack(side=RIGHT)
         
         # Área de texto com scroll próprio
         self.log_area = ScrolledText(log_panel, state="disabled", height=40)
         self.log_area.pack(fill=BOTH, expand=True)
+
+    def open_materia_multiselect(self):
+        """
+        Abre janela modal para seleção múltipla com filtro e checkbox.
+        """
+        todas_materias = self.lista_materias
+        
+        # Janela Popup
+        # CORREÇÃO: Passar 'master' como argumento nomeado, não posicional.
+        top = ttk.Toplevel(title="Selecionar Matérias", master=self)
+        top.geometry("600x600")
+        
+        # --- CABEÇALHO E FILTRO ---
+        header_frame = ttk.Frame(top, padding=10, bootstyle="light")
+        header_frame.pack(fill=X)
+        
+        ttk.Label(header_frame, text="Digite para filtrar:", font=("Arial", 10, "bold")).pack(anchor=W)
+        
+        search_var = StringVar()
+        search_entry = ttk.Entry(header_frame, textvariable=search_var)
+        search_entry.pack(fill=X, pady=(5, 0))
+        search_entry.focus_set()
+
+        # --- ÁREA DE ROLAGEM (Checkboxes) ---
+        list_container = ttk.Frame(top, padding=10)
+        list_container.pack(fill=BOTH, expand=True)
+
+        sf = ScrolledFrame(list_container, autohide=True)
+        sf.pack(fill=BOTH, expand=True)
+
+        # Variáveis de controle
+        check_vars = {}     # { "Nome da Matéria": IntVar }
+        check_widgets = []  # Lista de widgets checkbox criados
+
+        # Recupera seleção atual
+        current_selection = self.materia_selecionada if isinstance(self.materia_selecionada, list) else []
+
+        def populate_list(filter_text=""):
+            # 1. Limpa a visualização anterior
+            for widget in check_widgets:
+                widget.destroy()
+            check_widgets.clear()
+            
+            filter_text = filter_text.lower()
+            
+            # 2. Cria os checkboxes filtrados
+            for mat in todas_materias:
+                if filter_text in mat.lower():
+                    if mat not in check_vars:
+                        is_selected = 1 if mat in current_selection else 0
+                        check_vars[mat] = ttk.IntVar(value=is_selected)
+                    
+                    chk = ttk.Checkbutton(
+                        sf, 
+                        text=mat, 
+                        variable=check_vars[mat],
+                        bootstyle="primary-round-toggle"
+                    )
+                    chk.pack(anchor=W, pady=2, padx=5)
+                    check_widgets.append(chk)
+
+        search_var.trace("w", lambda *args: populate_list(search_var.get()))
+        populate_list()
+
+        # --- RODAPÉ ---
+        footer_frame = ttk.Frame(top, padding=15, bootstyle="light")
+        footer_frame.pack(fill=X, side=BOTTOM)
+
+        def confirm_selection():
+            # Coleta tudo que está marcado
+            selected_items = [m for m, var in check_vars.items() if var.get() == 1]
+            
+            self.materia_selecionada = selected_items
+            
+            # Atualiza visual
+            if not selected_items:
+                self.materia_display_var.set("")
+            else:
+                self.materia_display_var.set(", ".join(selected_items))
+            
+            self.save_settings()
+            top.destroy()
+
+        ttk.Button(footer_frame, text="Confirmar Seleção", command=confirm_selection, bootstyle="success", width=20).pack(side=RIGHT)
+        ttk.Button(footer_frame, text="Cancelar", command=top.destroy, bootstyle="secondary-outline").pack(side=RIGHT, padx=10)
 
     def clear_logs(self):
         """Limpa a área de logs"""
@@ -297,20 +390,27 @@ class App(ttk.Window):
             return
         
         self.save_settings()
-        materia_selecionada = self.combo_materia.get()
-        if not materia_selecionada:
-            Messagebox.show_error("Selecione uma matéria.", "Erro")
+        
+        # Validação de Matéria (Lista)
+        if not self.materia_selecionada:
+            Messagebox.show_error("Selecione pelo menos uma matéria.", "Erro")
             return
 
         config = self._get_config_dict()
         self.btn_review.config(state="disabled")
-        self.log(f"🔍 Revisando para a matéria: {materia_selecionada}...")
+        
+        # Display visual amigável (truncado se for muito longo)
+        display_mat = ", ".join(self.materia_selecionada)
+        if len(display_mat) > 50: display_mat = display_mat[:47] + "..."
+            
+        self.log(f"🔍 Revisando para: {display_mat}...")
         
         def review_worker():
             try:
                 orc = Orchestrator(config, self.log, headless=False)
                 data = orc.fetch_and_preview_matches()
-                self.after(0, lambda: self._open_review_window(data, orc.cache_manager, orc.data_loader, materia_selecionada))
+                # Passa a lista completa para o método de abertura de janela
+                self.after(0, lambda: self._open_review_window(data, orc.cache_manager, orc.data_loader, self.materia_selecionada))
             except Exception as e:
                 self.log(f"Erro na revisão: {e}")
                 self.log(traceback.format_exc())
@@ -319,15 +419,26 @@ class App(ttk.Window):
 
         threading.Thread(target=review_worker, daemon=True).start()
 
-    def _open_review_window(self, data, cache_mgr, data_loader, materia_selecionada):
+    def _open_review_window(self, data, cache_mgr, data_loader, materia_selecionada_list):
         if not data:
             self.log("⚠️ Nenhuma aula encontrada ou cache vazio.")
             return
-            
-        todos_filtros = data_loader.lista_completa_fallback + \
-                        [item for sublist in data_loader.assuntos_por_materia.values() for item in sublist]
         
-        filtros_materia = data_loader.assuntos_por_materia.get(materia_selecionada, [])
+        # Lógica para coletar filtros de TODAS as matérias selecionadas
+        filtros_focados = []
+        if isinstance(materia_selecionada_list, list):
+            for m in materia_selecionada_list:
+                filtros_focados.extend(data_loader.assuntos_por_materia.get(m, []))
+        else:
+            # Fallback string única
+            filtros_focados = data_loader.assuntos_por_materia.get(materia_selecionada_list, [])
+            
+        # Filtros focados + Todos os filtros (fallback)
+        todos_filtros = data_loader.lista_completa_fallback + filtros_focados
+        
+        # Remove duplicatas
+        todos_filtros = sorted(list(set(todos_filtros)))
+        filtros_focados = sorted(list(set(filtros_focados)))
 
         def on_save_review(reviewed_data):
             count = 0
@@ -338,7 +449,7 @@ class App(ttk.Window):
             self.log(f"✅ {count} aulas salvas no cache!")
             Messagebox.show_info("Revisão Salva! Clique em 'INICIAR AUTOMAÇÃO' para gerar os cadernos.", "Sucesso")
 
-        ReviewWindow(self, data, todos_filtros, filtros_materia, on_save_review)
+        ReviewWindow(self, data, todos_filtros, filtros_focados, on_save_review)
 
     def add_entry(self, parent, label, attr_name, show=None):
         ttk.Label(parent, text=label, font=("Helvetica", 9)).pack(anchor="w")
@@ -359,15 +470,18 @@ class App(ttk.Window):
         settings = self._get_config_dict()
         esc_save = {k: v.get() for k,v in self.vars_escolaridade.items()}
         settings["escolaridade"] = esc_save 
-        del settings["materia_selecionada"]
-        del settings["escolaridades"] 
-        settings["materia"] = self.combo_materia.get()
+        # Remove campos processados para não duplicar no JSON
+        if "escolaridades" in settings: del settings["escolaridades"]
+        
+        # Salva a lista de matérias
+        settings["materia_selecionada"] = self.materia_selecionada
+        
         settings["webapp_url"] = self.entry_webapp_url.get()
         settings["area_carreira"] = self.combo_area.get()
         
         try:
             with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=4)
+                json.dump(settings, f, ensure_ascii=False, indent=4)
         except Exception as e: self.log(f"Erro config: {e}")
 
     def load_settings(self):
@@ -388,8 +502,22 @@ class App(ttk.Window):
             else: safe_fill(self.entry_url, "url")
             safe_fill(self.entry_banca, "banca")
             safe_fill(self.entry_ano, "ano")
-            if "materia" in settings and settings["materia"] in self.lista_materias:
-                self.combo_materia.set(settings["materia"])
+            
+            # Carrega Matéria (Lista ou String Legada)
+            if "materia_selecionada" in settings:
+                val = settings["materia_selecionada"]
+                if isinstance(val, list):
+                    self.materia_selecionada = val
+                    self.materia_display_var.set(", ".join(val))
+                else:
+                    # Legado (string)
+                    self.materia_selecionada = [val] if val else []
+                    self.materia_display_var.set(val)
+            elif "materia" in settings: # Legado antigo
+                val = settings["materia"]
+                self.materia_selecionada = [val] if val else []
+                self.materia_display_var.set(val)
+
             if "escolaridade" in settings:
                 for key, val in settings["escolaridade"].items():
                     if key in self.vars_escolaridade: self.vars_escolaridade[key].set(val)
@@ -417,7 +545,7 @@ class App(ttk.Window):
             "ano": self.entry_ano.get(),
             "escolaridade": ",".join(escolaridades_selecionadas),
             "escolaridades": escolaridades_selecionadas,
-            "materia_selecionada": self.combo_materia.get(),
+            "materia_selecionada": self.materia_selecionada, # Retorna a LISTA
             "area_carreira": self.combo_area.get()
         }
 
@@ -426,7 +554,7 @@ class App(ttk.Window):
             Messagebox.show_error("URL Obrigatória", "Erro")
             return
         self.save_settings()
-        if not self.combo_materia.get():
+        if not self.materia_selecionada:
             Messagebox.show_error("Selecione Matéria", "Erro")
             return
         
@@ -506,8 +634,12 @@ class App(ttk.Window):
                     "caderno": item.get('url', '')
                 })
 
+            # Formata a matéria para envio (se for lista, junta com vírgula)
+            nome_disc = config['materia_selecionada']
+            if isinstance(nome_disc, list): nome_disc = ", ".join(nome_disc)
+
             payload = {
-                "nomeDisciplina": config['materia_selecionada'],
+                "nomeDisciplina": nome_disc,
                 "banca": config['banca'],
                 "escolaridade": config['escolaridade'],
                 "anos": config['ano'],
@@ -535,3 +667,7 @@ class App(ttk.Window):
             self.after(0, lambda: Messagebox.show_error(f"Erro ao enviar: {e}", "Erro Local"))
         finally:
             self.after(0, lambda: self.btn_send_sheet.config(state="normal"))
+
+if __name__ == "__main__":
+    app = App()
+    app.mainloop()

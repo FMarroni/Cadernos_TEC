@@ -9,9 +9,12 @@
     "ano": "2023, 2024",
     "escolaridade": {
         "Superior": true,
-        "M\u00e9dio": true,
+        "Médio": true,
         "Fundamental": false
     },
-    "area_carreira": "Servidores da Justi\u00e7a Federal (TRFs, STF e STJ)",
-    "materia": "Direito Agr\u00e1rio"
+    "materia_selecionada": [
+        "Direito Administrativo",
+        "Direito Constitucional"
+    ],
+    "area_carreira": "Servidores da Justiça Federal (TRFs, STF e STJ)"
 }
