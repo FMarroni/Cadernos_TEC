@@ -37,21 +37,23 @@ class Orchestrator:
         """
         current_url = self.user_data.get('course_url', '')
         current_id = self._extract_course_id(current_url)
-        cached_id = self.cache_manager.get_course_id()
+        
+        # 1. Define o contexto para o curso solicitado (não apaga os outros)
+        self.cache_manager.set_course_id(current_id)
 
         dados_para_review = []
         
-        # 1. VERIFICAÇÃO DE MEMÓRIA (Pulo do Gato para evitar Login BO)
-        # Nota: Idealmente verificaríamos se as matérias selecionadas mudaram para invalidar o cache,
-        # mas por enquanto mantemos a lógica baseada no ID do curso para performance.
-        if current_id and current_id == cached_id:
-            self.log(f"🧠 Curso ID {current_id} reconhecido na memória.")
+        # 2. Verifica se JÁ EXISTEM DADOS salvos para ESTE curso específico
+        if current_id and self.cache_manager.has_data():
+            self.log(f"🧠 Curso ID {current_id} encontrado na memória.")
             self.log("⏩ Pulando acesso ao BackOffice e usando dados salvos.")
             
-            # Reconstrói a estrutura para a ReviewWindow baseada apenas no Cache
-            data_map = self.cache_manager.cache_structure["data"]
-            if data_map:
-                for aula, filtros in data_map.items():
+            # Reconstrói a estrutura para a ReviewWindow baseada no Cache
+            # Acessa diretamente a estrutura interna pois já validamos o ID
+            raw_data = self.cache_manager.cache_structure["courses"][current_id]
+            
+            if raw_data:
+                for aula, filtros in raw_data.items():
                     matches_formatados = [{'termo': f, 'score': 1.0, 'origem': 'Memória'} for f in filtros]
                     dados_para_review.append({
                         'aula': aula,
@@ -59,14 +61,13 @@ class Orchestrator:
                     })
                 return dados_para_review
             else:
-                self.log("⚠️ Memória vazia, iniciando busca no BO...")
+                self.log("⚠️ Memória vazia (curso existe mas sem dados), iniciando busca...")
 
-        # 2. SE NÃO TIVER MEMÓRIA, ACESSA O BO
-        self.log(f"🔄 Novo curso detectado (ID: {current_id}). Iniciando acesso ao BO...")
+        # 3. SE NÃO TIVER MEMÓRIA, ACESSA O BO
+        self.log(f"🔄 Novo processamento necessário (ID: {current_id}). Iniciando acesso ao BO...")
         
-        # Limpa cache antigo pois mudou o curso
-        self.cache_manager.reset_cache()
-        self.cache_manager.set_course_id(current_id)
+        # Nota: Não resetamos mais o cache global aqui para preservar outros cursos.
+        # Se houver dados parciais corrompidos para este curso, o usuário pode limpar manualmente ou sobrescrever.
 
         automation = WebAutomation(log_callback=self.log, headless=self.headless)
         try:
@@ -85,7 +86,7 @@ class Orchestrator:
         finally:
             automation.stop()
 
-        # 3. RODA A IA
+        # 4. RODA A IA
         self.log("🤖 Processando aulas com IA...")
         tarefas_detalhadas = self._match_aulas_inteligente(aulas_bo, return_details=True)
         
@@ -104,11 +105,11 @@ class Orchestrator:
         """
         self.log("🚀 Iniciando fase de automação no TEC Concursos...")
         
-        # 1. Carrega tarefas da memória
+        # 1. Carrega tarefas da memória (do curso ATUAL selecionado)
         tarefas = self.cache_manager.get_all_tasks_formatted()
         
         if not tarefas:
-            self.log("❌ Nenhuma tarefa encontrada na memória.")
+            self.log("❌ Nenhuma tarefa encontrada na memória para este curso.")
             self.log("⚠️ Por favor, execute 'Revisar Matches' primeiro e Salve a revisão.")
             return None, []
 

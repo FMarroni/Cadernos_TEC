@@ -235,8 +235,28 @@ class App(ttk.Window):
         self.entry_materia_display = ttk.Entry(lbl_config, textvariable=self.materia_display_var, state="readonly")
         self.entry_materia_display.pack(fill=X, pady=(0, 2))
         
-        # Botão para abrir o seletor
-        ttk.Button(lbl_config, text="Selecionar Matérias...", bootstyle="outline-success", command=self.open_materia_multiselect).pack(fill=X, pady=(0, 5))
+        # --- Container para Botões (Selecionar e Limpar) ---
+        frame_botoes_mat = ttk.Frame(lbl_config)
+        frame_botoes_mat.pack(fill=X, pady=(0, 5))
+
+        # Botão Selecionar (Ocupa o espaço sobrando à esquerda)
+        ttk.Button(
+            frame_botoes_mat, 
+            text="Selecionar Matérias...", 
+            bootstyle="outline-success", 
+            command=self.open_materia_multiselect
+        ).pack(side=LEFT, fill=X, expand=True, padx=(0, 5))
+
+        # Botão Limpar (Fixo à direita)
+        # Limpa o texto exibido. 
+        # NOTA: Se você usa uma variável de lista interna (ex: self.lista_selecionada), 
+        # adicione a limpeza dela no lambda abaixo também.
+        ttk.Button(
+            frame_botoes_mat, 
+            text="Limpar", 
+            bootstyle="danger-outline", 
+            command=lambda: self.materia_display_var.set("")
+        ).pack(side=RIGHT)
 
         # Filtro: Área
         ttk.Label(lbl_config, text="Área / Carreira:", font=("Helvetica", 9)).pack(anchor="w", pady=(5,0))
